@@ -1,0 +1,12 @@
+profile: local
+server: nats://127.0.0.1:4222
+# Optional fallback when the server has no system account.
+# monitor-url: http://127.0.0.1:8222
+refresh: 2s
+
+# Prefer a credentials file. Avoid storing tokens in this file.
+# credentials: /absolute/path/to/user.creds
+
+# Optional local authority. Keep both paths private.
+# authority-dir: /absolute/path/to/nats-authority
+# authority-operator-seed: /absolute/path/to/operator.seed

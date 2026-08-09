@@ -1,0 +1,21 @@
+services:
+  nats:
+    image: nats:2.14.4-alpine
+    command:
+      - --jetstream
+      - --store_dir=/data
+      - --http_port=8222
+      - --name=nats-tui-local
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    volumes:
+      - nats-tui-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8222/healthz"]
+      interval: 2s
+      timeout: 1s
+      retries: 15
+
+volumes:
+  nats-tui-data:

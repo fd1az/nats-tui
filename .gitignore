@@ -1,0 +1,4 @@
+.reference/
+bin/
+coverage.out
+*.log
