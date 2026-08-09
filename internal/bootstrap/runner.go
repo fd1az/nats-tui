@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/clcsolutions/nats-tui/internal/adapters/localfiles"
 	"github.com/clcsolutions/nats-tui/internal/adapters/localstate"
 	"github.com/clcsolutions/nats-tui/internal/adapters/natsmonitor"
+	"github.com/clcsolutions/nats-tui/internal/app/alerts"
 	"github.com/clcsolutions/nats-tui/internal/app/connections"
 	"github.com/clcsolutions/nats-tui/internal/app/consumers"
 	"github.com/clcsolutions/nats-tui/internal/app/dashboard"
@@ -42,10 +44,16 @@ type Runner struct {
 	requestTemplates requestreply.TemplateRepository
 	clock            requestreply.Clock
 	ids              requestreply.IDGenerator
+	alertRepository  alertStore
 	readPayload      func(string) ([]byte, error)
 	authoritySigner  func([]byte) (operator.AuthoritySigner, error)
 	accountSigner    func([]byte) (operator.AuthoritySigner, error)
 	authorityStore   func(string) (operator.AuthorityRepository, error)
+}
+
+type alertStore interface {
+	alerts.AlertRepository
+	alerts.RuleRepository
 }
 
 type Session interface {
@@ -83,6 +91,8 @@ type Session interface {
 	operator.ClaimPublisher
 	requestreply.Publisher
 	requestreply.Requester
+	alerts.AdvisorySource
+	alerts.HealthSource
 	topology.Source
 	topology.Operator
 	Close()
@@ -105,6 +115,27 @@ func NewRunner() Runner {
 			return localfiles.NewAuthorityStore(directory)
 		},
 	}
+}
+
+func defaultAlertRepository(profile string) *localstate.AlertRepository {
+	directory, err := os.UserConfigDir()
+	if err != nil {
+		if home, homeErr := os.UserHomeDir(); homeErr == nil {
+			directory = filepath.Join(home, ".config")
+		} else {
+			directory = "."
+		}
+	}
+	profile = strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' {
+			return r
+		}
+		return '-'
+	}, profile)
+	if profile == "" {
+		profile = "local"
+	}
+	return localstate.NewAlertRepository(localstate.OSStateFile{Path: filepath.Join(directory, "nats-tui", "alerts-"+profile+".json")}, 1000)
 }
 
 func (r Runner) WithAuthorityDependencies(operatorSigner, accountSigner func([]byte) (operator.AuthoritySigner, error), store func(string) (operator.AuthorityRepository, error)) Runner {
@@ -134,6 +165,14 @@ func (r Runner) WithRequestDependencies(history requestreply.HistoryRepository, 
 		panic("request/reply dependencies cannot be nil")
 	}
 	r.requestHistory, r.requestTemplates, r.clock, r.ids = history, templates, clock, ids
+	return r
+}
+
+func (r Runner) WithAlertDependencies(repository alertStore, clock requestreply.Clock, ids requestreply.IDGenerator) Runner {
+	if repository == nil || clock == nil || ids == nil {
+		panic("alert dependencies cannot be nil")
+	}
+	r.alertRepository, r.clock, r.ids = repository, clock, ids
 	return r
 }
 
@@ -692,6 +731,13 @@ type workspaceState struct {
 func (r Runner) Run(ctx context.Context, settings config.Settings) error {
 	sessions := &sessionStore{objectFiles: r.objectTransfer()}
 	defer sessions.Close()
+	var alertCancel context.CancelFunc
+	activeSettings := settings
+	defer func() {
+		if alertCancel != nil {
+			alertCancel()
+		}
+	}()
 
 	connect := func(input tui.ConnectionInput) tea.Cmd {
 		return func() tea.Msg {
@@ -715,6 +761,7 @@ func (r Runner) Run(ctx context.Context, settings config.Settings) error {
 			}
 
 			sessions.Replace(monitor)
+			activeSettings = connectionSettings
 			return tui.ConnectedWithObjects(profile.Name(), state.snapshot, state.streams, state.consumers, state.buckets, state.objects)
 		}
 	}
@@ -1386,6 +1433,88 @@ func (r Runner) Run(ctx context.Context, settings config.Settings) error {
 			return tui.ConnectionClosed(serverID, cid)
 		}
 	}
+	loadAlerts := func(query alerts.Query) tea.Cmd {
+		return func() tea.Msg {
+			records, err := r.ListAlerts(ctx, activeSettings, query)
+			if err != nil {
+				return tui.AlertsFailed(err)
+			}
+			return tui.AlertsLoaded(records)
+		}
+	}
+	watchAlerts := func() tea.Cmd {
+		return func() tea.Msg {
+			if alertCancel != nil {
+				alertCancel()
+			}
+			watchCtx, cancel := context.WithCancel(ctx)
+			alertCancel = cancel
+			records, failures, err := r.WatchAlerts(watchCtx, activeSettings)
+			if err != nil {
+				cancel()
+				return tui.AlertsFailed(err)
+			}
+			visible := make(chan alerts.Record, 256)
+			go func() {
+				defer close(visible)
+				for records != nil || failures != nil {
+					select {
+					case <-watchCtx.Done():
+						return
+					case record, ok := <-records:
+						if !ok {
+							records = nil
+							continue
+						}
+						select {
+						case visible <- record:
+						case <-watchCtx.Done():
+							return
+						}
+					case watchErr, ok := <-failures:
+						if !ok {
+							failures = nil
+							continue
+						}
+						_ = watchErr // malformed advisories do not terminate the inbox
+					}
+				}
+			}()
+			return tui.AlertWatchStarted(visible)
+		}
+	}
+	ackAlert := func(id string) tea.Cmd {
+		return func() tea.Msg {
+			if err := r.AcknowledgeAlert(ctx, activeSettings, id); err != nil {
+				return tui.AlertActionFailed(err)
+			}
+			return tui.AlertAcked(id)
+		}
+	}
+	ackAllAlerts := func() tea.Cmd {
+		return func() tea.Msg {
+			count, err := r.AcknowledgeAllAlerts(ctx, activeSettings)
+			if err != nil {
+				return tui.AlertActionFailed(err)
+			}
+			return tui.AlertsAcked(count)
+		}
+	}
+	scanAlerts := func() tea.Cmd {
+		return func() tea.Msg {
+			results, err := r.ScanAlerts(ctx, activeSettings)
+			if err != nil {
+				return tui.AlertActionFailed(err)
+			}
+			count := 0
+			for _, result := range results {
+				if result.Stored {
+					count++
+				}
+			}
+			return tui.AlertsScanned(count)
+		}
+	}
 
 	model := tui.NewModel(settings.Profile, settings.Server, connect, loadMessages).
 		WithMessageWatch(startWatch, stopWatch).
@@ -1419,6 +1548,11 @@ func (r Runner) Run(ctx context.Context, settings config.Settings) error {
 		WithTopology(tui.TopologyServices{Load: loadTopology, Operate: operateTopology})
 	model = model.WithConnections(tui.ConnectionServices{Load: loadConnections, Close: closeConnection})
 	model = model.WithOperator(tui.OperatorServices{Load: loadOperator, CreateAccount: createOperatorAccount, CreateUser: createOperatorUser, UpdateAccount: updateOperatorAccount, DeleteAccount: deleteOperatorAccount, UpdateUser: updateOperatorUser, RevokeUser: revokeOperatorUser, DeleteUser: deleteOperatorUser, AddSigningKey: addOperatorSigningKey})
+	model = model.WithAlerts(tui.AlertServices{Load: loadAlerts, Watch: watchAlerts, Stop: func() {
+		if alertCancel != nil {
+			alertCancel()
+		}
+	}, Ack: ackAlert, AckAll: ackAllAlerts, Scan: scanAlerts})
 	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithContext(ctx))
 	if _, err := program.Run(); err != nil {
 		return fmt.Errorf("run terminal UI: %w", err)

@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	appalerts "github.com/clcsolutions/nats-tui/internal/app/alerts"
 	"github.com/clcsolutions/nats-tui/internal/app/consumers"
 	"github.com/clcsolutions/nats-tui/internal/app/dashboard"
 	"github.com/clcsolutions/nats-tui/internal/app/kvstore"
@@ -181,7 +182,9 @@ type Model struct {
 	topologyServices             TopologyServices
 	connectionServices           ConnectionServices
 	operatorServices             OperatorServices
+	alertServices                AlertServices
 	operator                     operatorState
+	alerts                       alertState
 	serverInput                  textinput.Model
 	spinner                      spinner.Model
 	err                          error
@@ -863,7 +866,15 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshErr = nil
 		m.err = nil
 		m.screen = screenWorkspace
-		return m, m.scheduleRefresh(m.refreshGeneration, refreshInterval)
+		commands := []tea.Cmd{m.scheduleRefresh(m.refreshGeneration, refreshInterval)}
+		if m.alertServices.Load != nil {
+			m.alerts.loading = true
+			commands = append(commands, m.alertServices.Load(appalerts.Query{Limit: 1000}))
+		}
+		if m.alertServices.Watch != nil {
+			commands = append(commands, m.alertServices.Watch())
+		}
+		return m, tea.Batch(commands...)
 	case connectionFailedMsg:
 		m.err = msg.err
 		return m.showConnection()
@@ -1523,6 +1534,55 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.connections.loading = false
 		m.connections.err = msg.err
 		return m, nil
+	case alertsLoadedMsg:
+		m.alerts.loading, m.alerts.err = false, nil
+		m.alerts.records = append([]appalerts.Record(nil), msg.records...)
+		m.alerts.cursor = min(m.alerts.cursor, max(len(m.displayedAlerts())-1, 0))
+		return m, nil
+	case alertsFailedMsg:
+		m.alerts.loading, m.alerts.err = false, msg.err
+		return m, nil
+	case alertWatchStartedMsg:
+		m.alerts.watching, m.alerts.events = true, msg.events
+		return m, waitAlertEvent(msg.events)
+	case alertWatchEventMsg:
+		if !m.alerts.paused {
+			m.alerts.records = append([]appalerts.Record{msg.record}, m.alerts.records...)
+			if len(m.alerts.records) > 1000 {
+				m.alerts.records = m.alerts.records[:1000]
+			}
+		}
+		return m, waitAlertEvent(msg.events)
+	case alertWatchEndedMsg:
+		m.alerts.watching, m.alerts.events = false, nil
+		return m, nil
+	case alertAckedMsg:
+		m.alerts.loading = false
+		m.alerts.err = nil
+		if msg.scan {
+			m.alerts.notice = fmt.Sprintf("health scan: %d new alerts", msg.count)
+		} else if msg.all {
+			for i := range m.alerts.records {
+				m.alerts.records[i].Acknowledged = true
+			}
+			m.alerts.notice = fmt.Sprintf("acknowledged %d alerts", msg.count)
+		} else {
+			for i := range m.alerts.records {
+				if m.alerts.records[i].ID == msg.id {
+					m.alerts.records[i].Acknowledged = true
+				}
+			}
+			m.alerts.notice = "alert acknowledged"
+		}
+		if msg.scan && m.alertServices.Load != nil {
+			m.alerts.loading = true
+			return m, m.alertServices.Load(appalerts.Query{Limit: 1000})
+		}
+		return m, nil
+	case alertAckFailedMsg:
+		m.alerts.loading = false
+		m.alerts.err = msg.err
+		return m, nil
 	}
 
 	switch m.screen {
@@ -1568,7 +1628,7 @@ func (m Model) updateConnecting(message tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) updateWorkspace(message tea.Msg) (tea.Model, tea.Cmd) {
 	key, ok := message.(tea.KeyMsg)
 	if !ok {
-		if m.loadingMessages || m.watchStarting || m.refreshing || m.keyValueEntrySaving || m.loadingKeyValueHistory || m.loadingKeyValueKeys || m.loadingKeyValueEntry || m.keyValueWatchStarting || m.loadingObjects || m.objectWatchStarting || m.objectBucketOperationRunning || m.requestReply.running || m.requestReply.loadingState || m.topology.loading || m.connections.loading || m.operator.loading || m.operator.running {
+		if m.loadingMessages || m.watchStarting || m.refreshing || m.keyValueEntrySaving || m.loadingKeyValueHistory || m.loadingKeyValueKeys || m.loadingKeyValueEntry || m.keyValueWatchStarting || m.loadingObjects || m.objectWatchStarting || m.objectBucketOperationRunning || m.requestReply.running || m.requestReply.loadingState || m.topology.loading || m.connections.loading || m.operator.loading || m.operator.running || m.alerts.loading {
 			var command tea.Cmd
 			m.spinner, command = m.spinner.Update(message)
 			return m, command
@@ -1592,6 +1652,11 @@ func (m Model) updateWorkspace(message tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if m.activeWorkspace == 10 {
 		if model, command, handled := m.updateOperatorKey(key); handled {
+			return model, command
+		}
+	}
+	if m.activeWorkspace == 11 {
+		if model, command, handled := m.updateAlertsKey(key); handled {
 			return model, command
 		}
 	}
@@ -1924,6 +1989,9 @@ func (m Model) updateWorkspace(message tea.Msg) (tea.Model, tea.Cmd) {
 		if m.activeWorkspace == 10 && len(m.operator.catalog.Accounts()) == 0 {
 			return m.startOperatorLoad()
 		}
+		if m.activeWorkspace == 11 && len(m.alerts.records) == 0 {
+			return m.startAlerts()
+		}
 	case "left", "h", "shift+tab":
 		m.activeWorkspace = (m.activeWorkspace - 1 + len(workspaces)) % len(workspaces)
 		if m.activeWorkspace == 8 && len(m.topology.snapshot.Servers()) == 0 {
@@ -1934,6 +2002,9 @@ func (m Model) updateWorkspace(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.activeWorkspace == 10 && len(m.operator.catalog.Accounts()) == 0 {
 			return m.startOperatorLoad()
+		}
+		if m.activeWorkspace == 11 && len(m.alerts.records) == 0 {
+			return m.startAlerts()
 		}
 	case "c":
 		return m.showConnection()
@@ -2522,6 +2593,10 @@ func (m Model) withMinimumDuration(command tea.Cmd, duration time.Duration) tea.
 }
 
 func (m *Model) selectWorkspace(key string) {
+	if key == "!" && len(workspaces) >= 12 {
+		m.activeWorkspace = 11
+		return
+	}
 	if key == "a" && len(workspaces) >= 11 {
 		m.activeWorkspace = 10
 		return
@@ -2684,7 +2759,7 @@ func (m Model) workspaceView(width, height int) string {
 	content := m.workspaceContent(contentWidth, contentAvailable)
 	footer := lipgloss.NewStyle().
 		Foreground(m.theme.muted).
-		Render("←/→ navigate   1-9/0/A jump   r refresh   c profiles   ? help   q quit")
+		Render("←/→ navigate   1-9/0/A/! jump   r refresh   c profiles   ? help   q quit")
 
 	top := strings.Join([]string{header, tabs, "", content}, "\n")
 	availableGap := max(contentHeight-lipgloss.Height(top)-lipgloss.Height(footer), 0)
@@ -2773,6 +2848,7 @@ var workspaces = []workspace{
 	{tab: "Topology", short: "Topo", title: "Server Topology", description: "Inspect servers, links, JetStream resources and cluster health."},
 	{tab: "Connections", short: "Conn", title: "Connections & Subscriptions", description: "Inspect live clients, subscriptions, traffic, pending bytes and slow consumers."},
 	{tab: "Accounts", short: "Acc", title: "Accounts & Users", description: "Inspect operator accounts, claims, limits, permissions, imports and exports."},
+	{tab: "Alerts", short: "!", title: "Alerts & Advisories", description: "Watch advisories, health thresholds and acknowledged incidents."},
 }
 
 func (m Model) workspaceTabs(width int) string {
@@ -2790,6 +2866,9 @@ func (m Model) workspaceTabs(width int) string {
 		shortcut := fmt.Sprintf("%d", index+1)
 		if index == 10 {
 			shortcut = "A"
+		}
+		if index == 11 {
+			shortcut = "!"
 		}
 		tabs = append(tabs, style.Render(shortcut+" "+label))
 	}
@@ -2829,6 +2908,9 @@ func (m Model) workspaceContent(width, height int) string {
 	}
 	if m.activeWorkspace == 10 {
 		return m.operatorView(width, height)
+	}
+	if m.activeWorkspace == 11 {
+		return m.alertsView(width, height)
 	}
 	item := workspaces[m.activeWorkspace]
 	title := lipgloss.NewStyle().Bold(true).Foreground(m.theme.primary).Render(item.title)

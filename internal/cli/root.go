@@ -164,6 +164,7 @@ type Dependencies struct {
 	OperatorAccountCreator OperatorAccountCreator
 	OperatorUserCreator    OperatorUserCreator
 	OperatorMutator        OperatorMutator
+	Alerts                 AlertManager
 	Clock                  Clock
 	FileSystem             FileSystem
 	Version                BuildInfo
@@ -227,6 +228,7 @@ func NewRoot(deps Dependencies) *cobra.Command {
 	root.AddCommand(newTopologyCommand(values, deps.TopologyReader, deps.TopologyOperator))
 	root.AddCommand(newConnectionsCommand(values, deps.ConnectionReader, deps.ConnectionCloser))
 	root.AddCommand(newAccountsCommand(values, deps.OperatorReader, deps.OperatorAccountCreator, deps.OperatorUserCreator, deps.OperatorMutator))
+	root.AddCommand(newAlertsCommand(values, deps.Alerts))
 	return root
 }
 

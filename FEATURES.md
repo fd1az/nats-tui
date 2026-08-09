@@ -253,14 +253,14 @@ required system-account and decentralized-authentication APIs.
 
 ## Alerts and Advisories
 
-- [ ] Consume JetStream advisories and API audit events.
-- [ ] Consumer delivery, ack, and max-delivery advisories.
-- [ ] Stream and consumer action advisories.
-- [ ] Server and connection health thresholds.
-- [ ] Local alert rules with severity and cooldown.
-- [ ] In-app alert inbox and acknowledgement.
-- [ ] Jump from an alert to the affected resource.
-- [ ] Optional webhook or command notification integration.
+- [x] Consume JetStream advisories and API audit events.
+- [x] Consumer delivery, ack, and max-delivery advisories.
+- [x] Stream and consumer action advisories.
+- [x] Server and connection health thresholds.
+- [x] Local alert rules with severity and cooldown.
+- [x] In-app alert inbox and acknowledgement.
+- [x] Jump from an alert to the affected resource.
+- [x] Optional webhook or command notification integration.
 
 ## Command Bar and Automation
 

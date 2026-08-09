@@ -29,7 +29,7 @@ The startup flow is:
 3. Visible connection/loading state.
 4. Navigable workspace.
 
-Use arrow keys, h/l, tab, `1-9`, or `0` for the tenth workspace to move between sections. Press c to return to
+Use arrow keys, h/l, tab, `1-9`, `0`, `A` (accounts), or `!` (alerts) to move between sections. Press c to return to
 the connection screen, ? for help, and q to quit from the workspace.
 
 In Streams, use j/k or the arrow keys to select a stream and Enter to load its
@@ -224,6 +224,39 @@ locally managed accounts/users into both the CLI and workspace `A`. Press `u`
 inside that workspace to switch between accounts and managed users. NATS does
 not expose a global user directory: only JWTs owned by this local authority can
 be enumerated safely.
+
+The Alerts workspace (`!`) is a persistent, profile-scoped incident inbox. It
+subscribes to JetStream advisories, API audit events, consumer ACK metrics, and
+local server/connection health evaluations. Use `/` to search, `v` to cycle
+severity, Space to pause the visual feed, Enter for the full JSON payload, `a`
+or `A` to acknowledge one/all alerts, `s` to scan health now, and `g` to jump to
+the affected stream, consumer, server, or connection. Stable IDs deduplicate
+replayed advisories, while malformed events never terminate the watch.
+
+The same inbox and rules are automation-friendly:
+
+    nats-tui alerts list --unacked --severity critical
+    nats-tui alerts list --search ORDERS --output json
+    nats-tui alerts watch --output ndjson
+    nats-tui alerts ack ALERT_ID
+    nats-tui alerts ack --all
+    nats-tui alerts scan
+
+    nats-tui alerts rules
+    nats-tui alerts rules add max-delivery \
+      --match '$JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES.>' \
+      --severity critical --cooldown 5m
+    nats-tui alerts rules add high-memory \
+      --metric server-memory --threshold 1073741824 \
+      --severity warning --cooldown 10m
+
+Live alerts can optionally be POSTed as JSON or passed to a local executable as
+JSON on stdin. Executables receive literal argument vectors and never run
+through a shell:
+
+    nats-tui alerts watch --webhook https://ops.example/hooks/nats
+    nats-tui alerts watch --notify-program ./notify \
+      --notify-arg=--channel --notify-arg=nats-ops
 
     nats-tui --authority-dir ./private \
       --authority-operator-seed ./operator.seed

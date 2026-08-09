@@ -30,7 +30,7 @@ func (f OSStateFile) Write(data []byte) error {
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return fmt.Errorf("create local state directory: %w", err)
 	}
-	temporary, err := os.CreateTemp(directory, ".request-reply-*.tmp")
+	temporary, err := os.CreateTemp(directory, ".nats-tui-state-*.tmp")
 	if err != nil {
 		return fmt.Errorf("create temporary local state: %w", err)
 	}
