@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"sort"
 	"strconv"
 	"strings"
@@ -33,10 +34,93 @@ type streamFlags struct {
 	mirrorStartSequence                                              uint64
 }
 
-func newStreamCommand(values *viper.Viper, service StreamManager) *cobra.Command {
+func newStreamCommand(values *viper.Viper, service StreamManager, clock Clock) *cobra.Command {
 	command := &cobra.Command{Use: "stream", Aliases: []string{"streams"}, Short: "Inspect and manage JetStream streams", Args: cobra.NoArgs}
-	command.AddCommand(newStreamListCommand(values, service), newStreamCreateCommand(values, service), newStreamEditCommand(values, service), newStreamDeleteCommand(values, service), newStreamPurgeCommand(values, service), newStreamDeleteMessageCommand(values, service), newStreamExportCommand(values, service))
+	command.AddCommand(newStreamListCommand(values, service), newStreamCreateCommand(values, service), newStreamEditCommand(values, service), newStreamDeleteCommand(values, service), newStreamPurgeCommand(values, service), newStreamDeleteMessageCommand(values, service), newStreamExportCommand(values, service), newStreamBackupCommand(values, service, clock), newStreamRestoreCommand(values, service, clock))
 	return command
+}
+
+func newStreamBackupCommand(values *viper.Viper, service StreamManager, clock Clock) *cobra.Command {
+	var consumers, checkMessages, force bool
+	var chunkSize, windowSize int
+	command := &cobra.Command{Use: "backup NAME DIRECTORY", Aliases: []string{"snapshot"}, Short: "Create an interoperable full stream backup", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
+		if service == nil {
+			return errors.New("stream manager is not configured")
+		}
+		reporter := newStreamProgressReporter(cmd.ErrOrStderr(), clock, "receiving")
+		result, err := service.BackupStream(cmd.Context(), config.Load(values), streams.BackupFile{
+			Stream: args[0], Directory: args[1], Force: force, IncludeConsumers: consumers,
+			CheckMessages: checkMessages, ChunkSize: chunkSize, WindowSize: windowSize,
+		}, reporter.Report)
+		if err != nil {
+			return err
+		}
+		reporter.Finish()
+		_, err = fmt.Fprintf(cmd.OutOrStdout(), "backed up stream %s to %s (%d messages, %d compressed bytes)\n", result.Stream, args[1], result.Messages, result.Transferred)
+		return err
+	}}
+	command.Flags().BoolVar(&consumers, "consumers", true, "include durable consumer configuration and state")
+	command.Flags().BoolVar(&checkMessages, "check", false, "verify stored message checksums before snapshotting")
+	command.Flags().IntVar(&chunkSize, "chunk-size", streams.DefaultSnapshotChunkSize, "snapshot transport chunk size in bytes (1 KiB to 1 MiB)")
+	command.Flags().IntVar(&windowSize, "window-size", streams.DefaultSnapshotWindowSize, "snapshot in-flight window in bytes (1 KiB to 32 MiB)")
+	command.Flags().BoolVar(&force, "force", false, "replace an existing backup directory after a successful snapshot")
+	return command
+}
+
+func newStreamRestoreCommand(values *viper.Viper, service StreamManager, clock Clock) *cobra.Command {
+	var yes bool
+	var chunkSize int
+	command := &cobra.Command{Use: "restore NAME DIRECTORY", Short: "Restore a stream and durable consumers from a full backup", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
+		if !yes {
+			return errors.New("restoring a stream requires --yes")
+		}
+		if service == nil {
+			return errors.New("stream manager is not configured")
+		}
+		reporter := newStreamProgressReporter(cmd.ErrOrStderr(), clock, "sending")
+		result, err := service.RestoreStream(cmd.Context(), config.Load(values), streams.RestoreFile{Stream: args[0], Directory: args[1], ChunkSize: chunkSize}, reporter.Report)
+		if err != nil {
+			return err
+		}
+		reporter.Finish()
+		_, err = fmt.Fprintf(cmd.OutOrStdout(), "restored stream %s from %s (%d messages, %d bytes)\n", result.Stream, args[1], result.Messages, result.Bytes)
+		return err
+	}}
+	command.Flags().BoolVar(&yes, "yes", false, "confirm creation of the stream from backup")
+	command.Flags().IntVar(&chunkSize, "chunk-size", streams.DefaultRestoreChunkSize, "restore transport chunk size in bytes (1 KiB to 1 MiB)")
+	return command
+}
+
+type streamProgressReporter struct {
+	output io.Writer
+	clock  Clock
+	verb   string
+	start  time.Time
+	last   streams.TransferProgress
+}
+
+func newStreamProgressReporter(output io.Writer, clock Clock, verb string) *streamProgressReporter {
+	return &streamProgressReporter{output: output, clock: clock, verb: verb, start: clock.Now()}
+}
+
+func (r *streamProgressReporter) Report(progress streams.TransferProgress) {
+	r.last = progress
+	elapsed := r.clock.Now().Sub(r.start)
+	if elapsed <= 0 {
+		elapsed = time.Second
+	}
+	rate := uint64(float64(progress.Transferred) / elapsed.Seconds())
+	if progress.Total > 0 {
+		_, _ = fmt.Fprintf(r.output, "\r%s %s / %s  %d chunks  %s/s", r.verb, humanCLIBytes(progress.Transferred), humanCLIBytes(progress.Total), progress.Chunks, humanCLIBytes(rate))
+		return
+	}
+	_, _ = fmt.Fprintf(r.output, "\r%s %s  %d chunks  %s/s", r.verb, humanCLIBytes(progress.Transferred), progress.Chunks, humanCLIBytes(rate))
+}
+
+func (r *streamProgressReporter) Finish() {
+	if r.last.Transferred > 0 {
+		_, _ = fmt.Fprintln(r.output)
+	}
 }
 
 func newStreamListCommand(values *viper.Viper, service StreamManager) *cobra.Command {

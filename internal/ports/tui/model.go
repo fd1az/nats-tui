@@ -58,6 +58,8 @@ type RefreshFunc func(uint64) tea.Cmd
 type ConsumerActionFunc func(ConsumerActionInput) tea.Cmd
 type StreamActionFunc func(StreamActionInput) tea.Cmd
 type StreamPurgeFunc func(StreamPurgeInput) tea.Cmd
+type StartStreamBackupFunc func(streams.BackupFile) tea.Cmd
+type StartStreamRestoreFunc func(streams.RestoreFile) tea.Cmd
 type KeyValueCreateFunc func(KeyValueCreateInput) tea.Cmd
 type KeyValueUpdateFunc func(KeyValueUpdateInput) tea.Cmd
 type KeyValueDeleteFunc func(KeyValueDeleteInput) tea.Cmd
@@ -163,6 +165,9 @@ type Model struct {
 	consumerAction               ConsumerActionFunc
 	streamAction                 StreamActionFunc
 	streamPurge                  StreamPurgeFunc
+	startStreamBackup            StartStreamBackupFunc
+	startStreamRestore           StartStreamRestoreFunc
+	stopStreamTransfer           StopWatchFunc
 	keyValueCreate               KeyValueCreateFunc
 	keyValueUpdate               KeyValueUpdateFunc
 	keyValueDelete               KeyValueDeleteFunc
@@ -210,6 +215,18 @@ type Model struct {
 	streamCursor                 int
 	streamForm                   *streamForm
 	streamPurgeForm              *streamPurgeForm
+	streamTransferForm           *streamTransferForm
+	streamTransferStarting       bool
+	streamTransferActive         bool
+	streamTransferCanceling      bool
+	streamTransferEvents         <-chan streams.TransferEvent
+	streamTransferProgress       streams.TransferProgress
+	streamTransferErr            error
+	streamTransferNotice         string
+	streamTransferDirection      string
+	streamTransferName           string
+	streamTransferDirectory      string
+	streamTransferStartedAt      time.Time
 	showStreamDetail             bool
 	confirmStreamDelete          bool
 	streamActionRunning          bool
@@ -391,6 +408,13 @@ type streamPurgeFailedMsg struct {
 	input StreamPurgeInput
 	err   error
 }
+type streamTransferStartedMsg struct{ events <-chan streams.TransferEvent }
+type streamTransferFailedMsg struct{ err error }
+type streamTransferEventMsg struct {
+	event  streams.TransferEvent
+	events <-chan streams.TransferEvent
+}
+type streamTransferEndedMsg struct{}
 type keyValueCreateSucceededMsg struct{ input KeyValueCreateInput }
 type keyValueCreateFailedMsg struct {
 	input KeyValueCreateInput
@@ -566,6 +590,11 @@ func (m Model) WithStreamActions(action StreamActionFunc) Model {
 
 func (m Model) WithStreamPurge(purge StreamPurgeFunc) Model {
 	m.streamPurge = purge
+	return m
+}
+
+func (m Model) WithStreamTransfers(backup StartStreamBackupFunc, restore StartStreamRestoreFunc, stop StopWatchFunc) Model {
+	m.startStreamBackup, m.startStreamRestore, m.stopStreamTransfer = backup, restore, stop
 	return m
 }
 
@@ -804,6 +833,12 @@ func ObjectTransferStarted(events <-chan objectstore.TransferEvent) tea.Msg {
 
 func ObjectTransferFailed(err error) tea.Msg { return objectTransferFailedMsg{err: err} }
 
+func StreamTransferStarted(events <-chan streams.TransferEvent) tea.Msg {
+	return streamTransferStartedMsg{events: events}
+}
+
+func StreamTransferFailed(err error) tea.Msg { return streamTransferFailedMsg{err: err} }
+
 func ObjectEditSucceeded(object objectstore.ObjectSummary) tea.Msg {
 	return objectEditSucceededMsg{object: object}
 }
@@ -1038,6 +1073,47 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.streamActionRunning, m.streamActionErr = false, msg.err
+		return m, nil
+	case streamTransferStartedMsg:
+		m.streamTransferStarting = false
+		m.streamTransferActive = true
+		m.streamTransferEvents = msg.events
+		return m, waitForStreamTransferEvent(msg.events)
+	case streamTransferFailedMsg:
+		m.streamTransferStarting = false
+		m.streamTransferActive = false
+		m.streamTransferErr = msg.err
+		return m, nil
+	case streamTransferEventMsg:
+		m.streamTransferProgress = msg.event.Progress
+		if msg.event.Done {
+			wasCanceling := m.streamTransferCanceling
+			m.streamTransferActive, m.streamTransferStarting, m.streamTransferCanceling = false, false, false
+			m.streamTransferEvents = nil
+			if wasCanceling {
+				m.streamTransferErr = nil
+				m.streamTransferNotice = "stream transfer canceled"
+				return m, nil
+			}
+			if msg.event.Err != nil {
+				m.streamTransferErr = msg.event.Err
+				return m, nil
+			}
+			m.streamTransferErr = nil
+			m.streamTransferNotice = m.streamTransferDirection + " completed for " + m.streamTransferName
+			m.refreshGeneration++
+			m.refreshing = false
+			return m.startRefresh()
+		}
+		return m, waitForStreamTransferEvent(msg.events)
+	case streamTransferEndedMsg:
+		m.streamTransferStarting = false
+		m.streamTransferActive = false
+		m.streamTransferEvents = nil
+		if m.streamTransferCanceling {
+			m.streamTransferCanceling = false
+			m.streamTransferNotice = "stream transfer canceled"
+		}
 		return m, nil
 	case keyValueCreateSucceededMsg:
 		if msg.input.Generation != m.refreshGeneration {
@@ -1733,7 +1809,7 @@ func (m Model) updateConnecting(message tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) updateWorkspace(message tea.Msg) (tea.Model, tea.Cmd) {
 	key, ok := message.(tea.KeyMsg)
 	if !ok {
-		if m.loadingMessages || m.watchStarting || m.refreshing || m.keyValueEntrySaving || m.loadingKeyValueHistory || m.loadingKeyValueKeys || m.loadingKeyValueEntry || m.keyValueWatchStarting || m.loadingObjects || m.objectWatchStarting || m.objectBucketOperationRunning || m.requestReply.running || m.requestReply.loadingState || m.topology.loading || m.connections.loading || m.operator.loading || m.operator.running || m.alerts.loading || m.bookmarks.loading {
+		if m.loadingMessages || m.watchStarting || m.refreshing || m.streamTransferStarting || m.streamTransferActive || m.keyValueEntrySaving || m.loadingKeyValueHistory || m.loadingKeyValueKeys || m.loadingKeyValueEntry || m.keyValueWatchStarting || m.loadingObjects || m.objectWatchStarting || m.objectBucketOperationRunning || m.requestReply.running || m.requestReply.loadingState || m.topology.loading || m.connections.loading || m.operator.loading || m.operator.running || m.alerts.loading || m.bookmarks.loading {
 			var command tea.Cmd
 			m.spinner, command = m.spinner.Update(message)
 			return m, command
@@ -1774,6 +1850,22 @@ func (m Model) updateWorkspace(message tea.Msg) (tea.Model, tea.Cmd) {
 		if model, command, handled := m.updateAlertsKey(key); handled {
 			return model, command
 		}
+	}
+	if m.streamTransferActive || m.streamTransferStarting || m.streamTransferCanceling {
+		if key.String() == "esc" && !m.streamTransferCanceling {
+			if m.stopStreamTransfer != nil {
+				m.stopStreamTransfer()
+			}
+			m.streamTransferCanceling = true
+		}
+		return m, nil
+	}
+	if m.streamTransferForm != nil {
+		return m.updateStreamTransferForm(key)
+	}
+	if m.streamTransferErr != nil && key.String() == "esc" {
+		m.streamTransferErr = nil
+		return m, nil
 	}
 	if m.objectTransferActive || m.objectTransferStarting || m.objectTransferCanceling {
 		if key.String() == "esc" && !m.objectTransferCanceling {
@@ -2069,6 +2161,25 @@ func (m Model) updateWorkspace(message tea.Msg) (tea.Model, tea.Cmd) {
 		if m.activeWorkspace == 4 && m.showKeyValueEntry && m.keyValueEntry != nil && !m.keyValueEntrySaving {
 			m.pendingKeyValueEntryRemoval = kvstore.RemovePurge
 			m.keyValueEntryWriteErr = nil
+		}
+	case "S":
+		if m.activeWorkspace == 1 && len(m.streams) > 0 && !m.streamActionRunning {
+			stream := m.streams[m.streamCursor]
+			if stream.Storage != streams.StorageFile {
+				m.streamTransferErr = fmt.Errorf("only file-backed streams support snapshots")
+				return m, nil
+			}
+			form := newStreamBackupForm(stream.Name)
+			m.streamTransferForm = &form
+			m.streamTransferErr = nil
+			return m, nil
+		}
+	case "R":
+		if m.activeWorkspace == 1 && !m.streamActionRunning {
+			form := newStreamRestoreForm("")
+			m.streamTransferForm = &form
+			m.streamTransferErr = nil
+			return m, nil
 		}
 	case "W":
 		if m.activeWorkspace == 5 && m.browsingObjects {
@@ -2893,6 +3004,9 @@ func (m Model) workspaceView(width, height int) string {
 	if m.commandBar.open {
 		return m.commandBarView(width, height)
 	}
+	if m.streamTransferForm != nil || m.streamTransferStarting || m.streamTransferActive || m.streamTransferCanceling || m.streamTransferErr != nil {
+		return m.streamTransferView(width, height)
+	}
 	if m.keyValueEntryForm != nil {
 		return m.keyValueEntryFormView(width, height)
 	}
@@ -3477,12 +3591,14 @@ func (m Model) streamsView(width int) string {
 		))
 	}
 
-	hint := lipgloss.NewStyle().Foreground(m.theme.muted).Render("↑/↓ select  •  enter detail  •  m messages  •  n new  •  e edit  •  d delete")
+	hint := lipgloss.NewStyle().Foreground(m.theme.muted).Render("↑/↓ select  •  enter detail  •  m messages  •  n new  •  e edit  •  S backup  •  R restore  •  d delete")
 	return heading + "\n\n" + strings.Join(rows, "\n") + "\n\n" + hint
 }
 
 func (m Model) streamActionFeedback() string {
 	switch {
+	case m.streamTransferNotice != "":
+		return "  " + lipgloss.NewStyle().Foreground(m.theme.mint).Render("✓ "+m.streamTransferNotice)
 	case m.streamActionRunning:
 		return "  " + lipgloss.NewStyle().Foreground(m.theme.yellow).Render("↻ applying")
 	case m.streamActionErr != nil:

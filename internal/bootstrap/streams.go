@@ -2,7 +2,9 @@ package bootstrap
 
 import (
 	"context"
+	"fmt"
 
+	"github.com/clcsolutions/nats-tui/internal/adapters/localfiles"
 	"github.com/clcsolutions/nats-tui/internal/app/streams"
 	"github.com/clcsolutions/nats-tui/internal/config"
 )
@@ -49,4 +51,40 @@ func (r Runner) DeleteStoredStreamMessage(ctx context.Context, settings config.S
 	actionCtx, cancel := r.withTimeout(ctx, streamActionTimeout)
 	defer cancel()
 	return streams.NewMaintenanceHandler(monitor).DeleteMessage(actionCtx, command)
+}
+
+func (r Runner) BackupStream(ctx context.Context, settings config.Settings, command streams.BackupFile, progress streams.TransferProgressFunc) (streams.BackupResult, error) {
+	monitor, err := r.connector()(settings)
+	if err != nil {
+		return streams.BackupResult{}, err
+	}
+	defer monitor.Close()
+	gateway, ok := monitor.(streams.SnapshotGateway)
+	if !ok {
+		return streams.BackupResult{}, fmt.Errorf("NATS session does not support stream snapshots")
+	}
+	archive := r.streamArchives
+	if archive == nil {
+		value := localfiles.NewOSStreamArchive()
+		archive = &value
+	}
+	return archive.Backup(ctx, gateway, command, progress)
+}
+
+func (r Runner) RestoreStream(ctx context.Context, settings config.Settings, command streams.RestoreFile, progress streams.TransferProgressFunc) (streams.RestoreResult, error) {
+	monitor, err := r.connector()(settings)
+	if err != nil {
+		return streams.RestoreResult{}, err
+	}
+	defer monitor.Close()
+	gateway, ok := monitor.(streams.SnapshotGateway)
+	if !ok {
+		return streams.RestoreResult{}, fmt.Errorf("NATS session does not support stream snapshots")
+	}
+	archive := r.streamArchives
+	if archive == nil {
+		value := localfiles.NewOSStreamArchive()
+		archive = &value
+	}
+	return archive.Restore(ctx, gateway, command, progress)
 }

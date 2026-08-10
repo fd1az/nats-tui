@@ -600,7 +600,7 @@ func (m Model) streamDetailView(width int, stream streams.Summary) string {
 		label.Render("Topology:     ") + value.Render(streamTopologyLabel(stream)), "",
 		label.Render("Cluster:      ") + value.Render(streamClusterHealth(stream)),
 		label.Render("Dependencies: ") + value.Render(streamDependencyHealth(stream)), "",
-		lipgloss.NewStyle().Foreground(m.theme.muted).Render("m messages  •  e advanced edit  •  P purge  •  d delete  •  esc back"),
+		lipgloss.NewStyle().Foreground(m.theme.muted).Render("m messages  •  e advanced edit  •  S backup  •  R restore  •  P purge  •  d delete  •  esc back"),
 	}
 	return lipgloss.NewStyle().MaxWidth(width).Render(strings.Join(lines, "\n"))
 }

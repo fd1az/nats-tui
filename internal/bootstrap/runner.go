@@ -41,6 +41,7 @@ import (
 
 type Runner struct {
 	objectFiles        *localfiles.ObjectTransfer
+	streamArchives     *localfiles.StreamArchive
 	connect            Connector
 	copyValue          tui.CopyValueFunc
 	timeout            TimeoutFactory
@@ -114,8 +115,9 @@ type TimeoutFactory func(context.Context, time.Duration) (context.Context, conte
 
 func NewRunner() Runner {
 	files := localfiles.NewOSObjectTransfer()
+	archives := localfiles.NewOSStreamArchive()
 	return Runner{
-		objectFiles: &files, connect: func(settings config.Settings) (Session, error) { return natsmonitor.Connect(settings) },
+		objectFiles: &files, streamArchives: &archives, connect: func(settings config.Settings) (Session, error) { return natsmonitor.Connect(settings) },
 		copyValue: clipboard.WriteAll, timeout: context.WithTimeout,
 		requestStateMu: &sync.Mutex{}, requestStates: make(map[string]*localstate.RequestRepository),
 		bookmarkStateMu: &sync.Mutex{}, bookmarkStates: make(map[string]*localstate.BookmarkRepository),
@@ -188,6 +190,11 @@ func NewRunnerWithDependencies(files localfiles.ObjectTransfer, connect Connecto
 	runner := NewRunner()
 	runner.objectFiles, runner.connect, runner.copyValue, runner.timeout = &files, connect, copyValue, timeout
 	return runner
+}
+
+func (r Runner) WithStreamArchiveDependencies(archives localfiles.StreamArchive) Runner {
+	r.streamArchives = &archives
+	return r
 }
 
 func (r Runner) WithRequestDependencies(history requestreply.HistoryRepository, templates requestreply.TemplateRepository, clock requestreply.Clock, ids requestreply.IDGenerator) Runner {
@@ -811,6 +818,13 @@ func (r Runner) objectTransfer() localfiles.ObjectTransfer {
 	return *r.objectFiles
 }
 
+func (r Runner) streamArchive() localfiles.StreamArchive {
+	if r.streamArchives == nil {
+		return localfiles.NewOSStreamArchive()
+	}
+	return *r.streamArchives
+}
+
 type workspaceState struct {
 	snapshot  dashboard.Snapshot
 	streams   []streams.Summary
@@ -820,7 +834,7 @@ type workspaceState struct {
 }
 
 func (r Runner) Run(ctx context.Context, settings config.Settings) error {
-	sessions := &sessionStore{objectFiles: r.objectTransfer()}
+	sessions := &sessionStore{objectFiles: r.objectTransfer(), streamArchive: r.streamArchive()}
 	defer sessions.Close()
 	var alertCancel context.CancelFunc
 	activeSettings := settings
@@ -919,6 +933,25 @@ func (r Runner) Run(ctx context.Context, settings config.Settings) error {
 		}
 	}
 	stopObjectTransfer := func() { sessions.StopObjectTransfer() }
+	startStreamBackup := func(command streams.BackupFile) tea.Cmd {
+		return func() tea.Msg {
+			events, err := sessions.StartStreamBackup(ctx, command)
+			if err != nil {
+				return tui.StreamTransferFailed(err)
+			}
+			return tui.StreamTransferStarted(events)
+		}
+	}
+	startStreamRestore := func(command streams.RestoreFile) tea.Cmd {
+		return func() tea.Msg {
+			events, err := sessions.StartStreamRestore(ctx, command)
+			if err != nil {
+				return tui.StreamTransferFailed(err)
+			}
+			return tui.StreamTransferStarted(events)
+		}
+	}
+	stopStreamTransfer := func() { sessions.StopStreamTransfer() }
 	startObjectWatch := func(input tui.ObjectWatchInput) tea.Cmd {
 		return func() tea.Msg {
 			events, err := sessions.StartObjectWatch(ctx, input.Bucket)
@@ -1687,6 +1720,7 @@ func (r Runner) Run(ctx context.Context, settings config.Settings) error {
 		WithConsumerActions(consumerAction).
 		WithStreamActions(streamAction).
 		WithStreamPurge(streamPurge).
+		WithStreamTransfers(startStreamBackup, startStreamRestore, stopStreamTransfer).
 		WithKeyValueCreate(createKeyValue).
 		WithKeyValueUpdate(updateKeyValue).
 		WithKeyValueDelete(deleteKeyValue).
@@ -1758,8 +1792,10 @@ type sessionStore struct {
 	watchCancel          context.CancelFunc
 	keyValueWatchCancel  context.CancelFunc
 	objectTransferCancel context.CancelFunc
+	streamTransferCancel context.CancelFunc
 	objectWatchCancel    context.CancelFunc
 	objectFiles          localfiles.ObjectTransfer
+	streamArchive        localfiles.StreamArchive
 }
 
 func (s *sessionStore) Replace(monitor Session) {
@@ -1777,6 +1813,10 @@ func (s *sessionStore) Replace(monitor Session) {
 	if s.objectTransferCancel != nil {
 		s.objectTransferCancel()
 		s.objectTransferCancel = nil
+	}
+	if s.streamTransferCancel != nil {
+		s.streamTransferCancel()
+		s.streamTransferCancel = nil
 	}
 	if s.objectWatchCancel != nil {
 		s.objectWatchCancel()
@@ -1932,6 +1972,62 @@ func (s *sessionStore) StopObjectTransfer() {
 	}
 }
 
+func (s *sessionStore) StartStreamBackup(ctx context.Context, command streams.BackupFile) (<-chan streams.TransferEvent, error) {
+	return s.startStreamTransfer(ctx, func(transferCtx context.Context, gateway streams.SnapshotGateway, progress streams.TransferProgressFunc) streams.TransferEvent {
+		result, err := s.streamArchive.Backup(transferCtx, gateway, command, progress)
+		return streams.TransferEvent{Backup: result, Directory: command.Directory, Err: err, Done: true}
+	})
+}
+
+func (s *sessionStore) StartStreamRestore(ctx context.Context, command streams.RestoreFile) (<-chan streams.TransferEvent, error) {
+	return s.startStreamTransfer(ctx, func(transferCtx context.Context, gateway streams.SnapshotGateway, progress streams.TransferProgressFunc) streams.TransferEvent {
+		result, err := s.streamArchive.Restore(transferCtx, gateway, command, progress)
+		return streams.TransferEvent{Restore: result, Directory: command.Directory, Err: err, Done: true}
+	})
+}
+
+func (s *sessionStore) startStreamTransfer(ctx context.Context, run func(context.Context, streams.SnapshotGateway, streams.TransferProgressFunc) streams.TransferEvent) (<-chan streams.TransferEvent, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.monitor == nil {
+		return nil, fmt.Errorf("no active NATS connection")
+	}
+	gateway, ok := s.monitor.(streams.SnapshotGateway)
+	if !ok {
+		return nil, fmt.Errorf("NATS session does not support stream snapshots")
+	}
+	if s.streamTransferCancel != nil {
+		s.streamTransferCancel()
+	}
+	transferCtx, cancel := context.WithCancel(ctx)
+	s.streamTransferCancel = cancel
+	events := make(chan streams.TransferEvent, 32)
+	go func() {
+		defer close(events)
+		progress := func(update streams.TransferProgress) {
+			select {
+			case events <- streams.TransferEvent{Progress: update}:
+			case <-transferCtx.Done():
+			}
+		}
+		terminal := run(transferCtx, gateway, progress)
+		select {
+		case events <- terminal:
+		case <-ctx.Done():
+		}
+	}()
+	return events, nil
+}
+
+func (s *sessionStore) StopStreamTransfer() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.streamTransferCancel != nil {
+		s.streamTransferCancel()
+		s.streamTransferCancel = nil
+	}
+}
+
 func (s *sessionStore) Close() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1948,6 +2044,10 @@ func (s *sessionStore) Close() {
 		if s.objectTransferCancel != nil {
 			s.objectTransferCancel()
 			s.objectTransferCancel = nil
+		}
+		if s.streamTransferCancel != nil {
+			s.streamTransferCancel()
+			s.streamTransferCancel = nil
 		}
 		if s.objectWatchCancel != nil {
 			s.objectWatchCancel()

@@ -95,6 +95,8 @@ type StreamManager interface {
 	OperateStreamConfig(context.Context, config.Settings, streams.Command) error
 	PurgeStreamMessages(context.Context, config.Settings, streams.PurgeCommand) error
 	DeleteStoredStreamMessage(context.Context, config.Settings, streams.MessageDeleteCommand) error
+	BackupStream(context.Context, config.Settings, streams.BackupFile, streams.TransferProgressFunc) (streams.BackupResult, error)
+	RestoreStream(context.Context, config.Settings, streams.RestoreFile, streams.TransferProgressFunc) (streams.RestoreResult, error)
 }
 
 type CorePublisher interface {
@@ -234,7 +236,7 @@ func NewRoot(deps Dependencies) *cobra.Command {
 		transfer: deps.ObjectTransfer, editor: deps.ObjectEditor, deleter: deps.ObjectDeleter, linkCreator: deps.ObjectLinkCreator,
 		bucketCreator: deps.ObjectBucketCreator, bucketUpdater: deps.ObjectBucketUpdater, bucketDeleter: deps.ObjectBucketDeleter,
 	}, clock))
-	root.AddCommand(newStreamCommand(values, deps.Streams))
+	root.AddCommand(newStreamCommand(values, deps.Streams, clock))
 	root.AddCommand(newPublishCommand(values, deps.CorePublisher, files))
 	root.AddCommand(newRequestCommand(values, requestServices{requester: deps.CoreRequester, history: deps.RequestHistory, templates: deps.RequestTemplates}, files))
 	root.AddCommand(newTopologyCommand(values, deps.TopologyReader, deps.TopologyOperator))

@@ -1,6 +1,7 @@
 package natsmonitor
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -21,6 +22,75 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 )
+
+func TestStreamBackupAndRestoreRoundTrip(t *testing.T) {
+	server := os.Getenv("NATS_TUI_TEST_SERVER")
+	if server == "" {
+		t.Skip("NATS_TUI_TEST_SERVER is not set")
+	}
+	monitor, err := Connect(config.Settings{Server: server})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(monitor.Close)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	suffix := time.Now().UnixNano()
+	name := fmt.Sprintf("NATS_TUI_BACKUP_%d", suffix)
+	subject := fmt.Sprintf("nats-tui.backup.%d", suffix)
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cleanupCancel()
+		_ = monitor.jetstream.DeleteStream(cleanupCtx, name)
+	})
+	stream, err := monitor.jetstream.CreateStream(ctx, jetstream.StreamConfig{Name: name, Subjects: []string{subject}, Storage: jetstream.FileStorage})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := monitor.jetstream.Publish(ctx, subject, []byte(`{"event":"created"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stream.CreateConsumer(ctx, jetstream.ConsumerConfig{Durable: "WORKER", AckPolicy: jetstream.AckExplicitPolicy}); err != nil {
+		t.Fatal(err)
+	}
+
+	var data, metadata bytes.Buffer
+	var backupProgress appstreams.TransferProgress
+	backup, err := appstreams.NewBackupHandler(monitor).Handle(ctx, appstreams.BackupRequest{
+		Stream: name, Data: &data, Metadata: &metadata, IncludeConsumers: true,
+	}, func(value appstreams.TransferProgress) { backupProgress = value })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if backup.Messages != 1 || backup.Consumers != 1 || data.Len() == 0 || metadata.Len() == 0 || backupProgress.Transferred != uint64(data.Len()) {
+		t.Fatalf("backup=%+v progress=%+v data=%d metadata=%d", backup, backupProgress, data.Len(), metadata.Len())
+	}
+	if !strings.Contains(metadata.String(), `"first_seq"`) || !strings.Contains(metadata.String(), `"consumer_count"`) {
+		t.Fatalf("backup metadata lost server state fields: %s", metadata.String())
+	}
+	if err := monitor.jetstream.DeleteStream(ctx, name); err != nil {
+		t.Fatal(err)
+	}
+
+	var restoreProgress appstreams.TransferProgress
+	restored, err := appstreams.NewRestoreHandler(monitor).Handle(ctx, appstreams.RestoreRequest{
+		Stream: name, Data: bytes.NewReader(data.Bytes()), Metadata: bytes.NewReader(metadata.Bytes()), DataSize: uint64(data.Len()),
+	}, func(value appstreams.TransferProgress) { restoreProgress = value })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restored.Messages != 1 || restored.Consumers != 1 || restoreProgress.Transferred != uint64(data.Len()) {
+		t.Fatalf("restore=%+v progress=%+v", restored, restoreProgress)
+	}
+	restoredStream, err := monitor.jetstream.Stream(ctx, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := restoredStream.Info(ctx)
+	if err != nil || info.State.Msgs != 1 || info.State.Consumers != 1 {
+		t.Fatalf("restored info=%+v err=%v", info, err)
+	}
+}
 
 func TestTopologyUsesSystemAPIOrReportsMissingCapability(t *testing.T) {
 	server := os.Getenv("NATS_TUI_TEST_SERVER")

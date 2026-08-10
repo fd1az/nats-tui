@@ -83,7 +83,7 @@ application and adapter boundaries.
 - [x] Metadata editing.
 - [x] Stream purge: all, sequence range, subject, and keep count.
 - [x] Delete an individual stored message.
-- [ ] Stream backup and restore.
+- [x] Full stream backup and restore with messages and durable consumer state.
 - [x] Copy/export stream configuration.
 - [x] Cluster and replica health with peer lag and current status.
 - [x] Stream leader step-down.

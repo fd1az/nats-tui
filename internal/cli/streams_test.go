@@ -16,6 +16,20 @@ type streamManagerStub struct {
 	command  streams.Command
 	purge    streams.PurgeCommand
 	deleted  streams.MessageDeleteCommand
+	backup   streams.BackupFile
+	restore  streams.RestoreFile
+}
+
+func (s *streamManagerStub) BackupStream(_ context.Context, settings config.Settings, command streams.BackupFile, progress streams.TransferProgressFunc) (streams.BackupResult, error) {
+	s.settings, s.backup = settings, command
+	progress(streams.TransferProgress{Transferred: 7, Total: 7, Chunks: 1})
+	return streams.BackupResult{Stream: command.Stream, Messages: 2, Transferred: 7, Chunks: 1}, nil
+}
+
+func (s *streamManagerStub) RestoreStream(_ context.Context, settings config.Settings, command streams.RestoreFile, progress streams.TransferProgressFunc) (streams.RestoreResult, error) {
+	s.settings, s.restore = settings, command
+	progress(streams.TransferProgress{Transferred: 7, Total: 7, Chunks: 1})
+	return streams.RestoreResult{Stream: command.Stream, Messages: 2, Bytes: 12, Transferred: 7, Chunks: 1}, nil
 }
 
 func (s *streamManagerStub) ListStreamCatalog(_ context.Context, settings config.Settings) ([]streams.Summary, error) {
@@ -108,5 +122,48 @@ func TestStreamPurgeAndMessageDeleteRequireConfirmation(t *testing.T) {
 	}
 	if service.deleted.Sequence != 42 || !service.deleted.Secure {
 		t.Fatalf("deleted=%+v", service.deleted)
+	}
+}
+
+func TestStreamBackupKeepsMachineResultOnStdoutAndProgressOnStderr(t *testing.T) {
+	t.Parallel()
+	service := new(streamManagerStub)
+	root := NewRoot(Dependencies{Streams: service, Clock: fixedClock{now: time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)}})
+	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
+	root.SetOut(stdout)
+	root.SetErr(stderr)
+	root.SetArgs([]string{"--profile", "staging", "stream", "backup", "ORDERS", "/tmp/orders", "--check", "--consumers=false", "--chunk-size", "65536", "--window-size", "1048576", "--force"})
+	if err := root.ExecuteContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if service.settings.Profile != "staging" || service.backup.Stream != "ORDERS" || service.backup.Directory != "/tmp/orders" || service.backup.IncludeConsumers || !service.backup.CheckMessages || !service.backup.Force {
+		t.Fatalf("settings=%+v backup=%+v", service.settings, service.backup)
+	}
+	if got := stdout.String(); got != "backed up stream ORDERS to /tmp/orders (2 messages, 7 compressed bytes)\n" {
+		t.Fatalf("stdout=%q", got)
+	}
+	if !bytes.Contains(stderr.Bytes(), []byte("receiving")) || !bytes.Contains(stderr.Bytes(), []byte("1 chunks")) {
+		t.Fatalf("stderr=%q", stderr.String())
+	}
+}
+
+func TestStreamRestoreRequiresConfirmationAndReportsResult(t *testing.T) {
+	t.Parallel()
+	service := new(streamManagerStub)
+	unsafe := NewRoot(Dependencies{Streams: service})
+	unsafe.SetArgs([]string{"stream", "restore", "ORDERS", "/tmp/orders"})
+	if err := unsafe.ExecuteContext(context.Background()); err == nil {
+		t.Fatal("restore without confirmation succeeded")
+	}
+	root := NewRoot(Dependencies{Streams: service, Clock: fixedClock{now: time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)}})
+	stdout := new(bytes.Buffer)
+	root.SetOut(stdout)
+	root.SetErr(new(bytes.Buffer))
+	root.SetArgs([]string{"stream", "restore", "ORDERS", "/tmp/orders", "--yes", "--chunk-size", "32768"})
+	if err := root.ExecuteContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if service.restore.ChunkSize != 32768 || stdout.String() != "restored stream ORDERS from /tmp/orders (2 messages, 12 bytes)\n" {
+		t.Fatalf("restore=%+v stdout=%q", service.restore, stdout.String())
 	}
 }

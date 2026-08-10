@@ -73,6 +73,15 @@ and source details that were not changed are preserved.
 Stream detail also renders cluster leadership, replica current/offline state,
 peer lag, and a compact upstream dependency chain with mirror/source lag.
 
+Press `S` to back up the selected file-backed stream into the standard NATS
+`backup.json` + `stream.tar.s2` directory format. The centered form explains
+consumer-state inclusion, checksum verification, and safe replacement. Press
+`R` to restore a backup; restore remains available when the account has no
+streams and requires an explicit confirmation. Both directions stream data
+without loading the archive into memory, show bytes/chunks/speed, and can be
+canceled with Escape. Local backups are built in a private staging directory
+and become visible only after both files are synced successfully.
+
 Press `P` on a stream to open guided purge. It supports the whole stream, a
 subject filter, a sequence boundary, or keeping the newest N messages and always
 requires a second confirmation. Advanced stream operations are equally
@@ -95,6 +104,13 @@ scriptable:
     nats-tui stream purge ORDERS --subject 'orders.expired.>' --keep 10 --yes
     nats-tui stream delete-message ORDERS 421 --secure --yes
     nats-tui stream export ORDERS
+    nats-tui stream backup ORDERS ./backups/ORDERS --consumers --check
+    nats-tui stream restore ORDERS ./backups/ORDERS --yes
+
+These backups are interoperable with the official `nats stream backup` and
+`nats stream restore` commands. Progress is emitted on stderr, leaving stdout
+safe for scripts. Existing backup directories are preserved unless `--force`
+is passed; the target stream must not exist during restore.
 
 The Subject Explorer derives a navigable tree from every configured stream
 subject. It supports reactive `/` search across subject patterns and owning
