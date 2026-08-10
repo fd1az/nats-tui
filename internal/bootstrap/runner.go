@@ -70,6 +70,7 @@ type Session interface {
 	dashboard.Monitor
 	streams.Catalog
 	streams.Operator
+	streams.Maintenance
 	consumers.Catalog
 	consumers.Operator
 	connections.Source
@@ -1118,6 +1119,20 @@ func (r Runner) Run(ctx context.Context, settings config.Settings) error {
 			return tui.StreamActionSucceeded(input.Generation, input)
 		}
 	}
+	streamPurge := func(input tui.StreamPurgeInput) tea.Cmd {
+		return func() tea.Msg {
+			monitor := sessions.Current()
+			if monitor == nil {
+				return tui.StreamPurgeFailed(input, fmt.Errorf("no active NATS connection"))
+			}
+			actionCtx, cancel := r.withTimeout(ctx, streamActionTimeout)
+			defer cancel()
+			if err := streams.NewMaintenanceHandler(monitor).Purge(actionCtx, input.Command); err != nil {
+				return tui.StreamPurgeFailed(input, err)
+			}
+			return tui.StreamPurgeSucceeded(input)
+		}
+	}
 	createKeyValue := func(input tui.KeyValueCreateInput) tea.Cmd {
 		return func() tea.Msg {
 			monitor := sessions.Current()
@@ -1671,6 +1686,7 @@ func (r Runner) Run(ctx context.Context, settings config.Settings) error {
 		WithRefresh(refresh).
 		WithConsumerActions(consumerAction).
 		WithStreamActions(streamAction).
+		WithStreamPurge(streamPurge).
 		WithKeyValueCreate(createKeyValue).
 		WithKeyValueUpdate(updateKeyValue).
 		WithKeyValueDelete(deleteKeyValue).

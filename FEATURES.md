@@ -74,30 +74,30 @@ application and adapter boundaries.
 - [x] Edit streams while preserving unexposed advanced configuration.
 - [x] Delete streams with explicit destructive confirmation.
 - [x] Configure name, description, subjects, storage, retention, replicas, max messages, and max bytes.
-- [ ] Full stream configuration editor.
-- [ ] Max age, max message size, max messages per subject, duplicate window, discard policy, and compression.
-- [ ] Allow direct, mirror direct, rollup, deny delete, deny purge, and sealed state.
-- [ ] Placement tags and cluster placement.
-- [ ] Republish configuration.
-- [ ] Subject transforms.
-- [ ] Metadata editing.
-- [ ] Stream purge: all, sequence range, subject, and keep count.
-- [ ] Delete an individual stored message.
+- [x] Full stream configuration editor.
+- [x] Max age, max message size, max messages per subject, duplicate window, discard policy, and compression.
+- [x] Allow direct, mirror direct, rollup, deny delete, deny purge, and sealed state.
+- [x] Placement tags and cluster placement.
+- [x] Republish configuration.
+- [x] Subject transforms.
+- [x] Metadata editing.
+- [x] Stream purge: all, sequence range, subject, and keep count.
+- [x] Delete an individual stored message.
 - [ ] Stream backup and restore.
-- [ ] Copy/export stream configuration.
-- [ ] Cluster and replica health with peer lag and current status.
-- [ ] Stream leader step-down.
+- [x] Copy/export stream configuration.
+- [x] Cluster and replica health with peer lag and current status.
+- [x] Stream leader step-down.
 
 ## Mirrors and Sources
 
-- [ ] Create a stream mirror.
-- [ ] Configure mirror start sequence or start time.
-- [ ] Mirror subject transforms and external API/delivery prefixes.
-- [ ] Create and edit stream sources.
-- [ ] Multiple source streams.
-- [ ] Source filters and subject transforms.
-- [ ] Mirror/source lag and health.
-- [ ] Visualize stream dependency chains.
+- [x] Create a stream mirror.
+- [x] Configure mirror start sequence or start time.
+- [x] Mirror subject transforms and external API/delivery prefixes.
+- [x] Create and edit stream sources.
+- [x] Multiple source streams.
+- [x] Source filters and subject transforms.
+- [x] Mirror/source lag and health.
+- [x] Visualize stream dependency chains.
 
 ## Consumer Management and Lag — Partial
 

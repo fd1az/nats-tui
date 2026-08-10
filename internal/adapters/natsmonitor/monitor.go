@@ -197,8 +197,20 @@ func (m *Monitor) ListStreams(ctx context.Context) ([]streams.Summary, error) {
 			Replicas:    info.Config.Replicas,
 			MaxMessages: info.Config.MaxMsgs,
 			MaxBytes:    info.Config.MaxBytes,
-			FirstAt:     info.State.FirstTime,
-			LastAt:      info.State.LastTime,
+			MaxAge:      info.Config.MaxAge, MaxMessageSize: info.Config.MaxMsgSize,
+			MaxMessagesPerSubject: info.Config.MaxMsgsPerSubject, DuplicateWindow: info.Config.Duplicates,
+			MaxConsumers: info.Config.MaxConsumers, Discard: streamDiscard(info.Config.Discard),
+			DiscardNewPerSubject: info.Config.DiscardNewPerSubject, Compression: info.Config.Compression != jetstream.NoCompression,
+			AllowDirect: info.Config.AllowDirect, MirrorDirect: info.Config.MirrorDirect, AllowRollup: info.Config.AllowRollup,
+			DenyDelete: info.Config.DenyDelete, DenyPurge: info.Config.DenyPurge, Sealed: info.Config.Sealed,
+			NoAck: info.Config.NoAck, AllowMessageTTL: info.Config.AllowMsgTTL,
+			PlacementCluster: streamPlacementCluster(info.Config.Placement), PlacementTags: streamPlacementTags(info.Config.Placement),
+			Metadata: cloneStringMap(info.Config.Metadata), SubjectTransform: streamSubjectTransform(info.Config.SubjectTransform),
+			Republish: streamRepublish(info.Config.RePublish), Mirror: streamSourceFromNATS(info.Config.Mirror), Sources: streamSourcesFromNATS(info.Config.Sources),
+			Cluster: streamClusterName(info.Cluster), Leader: streamLeader(info.Cluster), ReplicaHealth: streamReplicaHealth(info.Cluster),
+			MirrorHealth: streamSourceHealth(info.Mirror), SourceHealth: streamSourcesHealth(info.Sources),
+			FirstAt: info.State.FirstTime,
+			LastAt:  info.State.LastTime,
 		})
 	}
 	if err := lister.Err(); err != nil {
@@ -917,6 +929,43 @@ func (m *Monitor) OperateStream(ctx context.Context, command streams.Command) er
 	}
 }
 
+func (m *Monitor) PurgeStream(ctx context.Context, command streams.PurgeCommand) error {
+	stream, err := m.jetstream.Stream(ctx, command.Stream)
+	if err != nil {
+		return fmt.Errorf("open stream %q: %w", command.Stream, err)
+	}
+	options := make([]jetstream.StreamPurgeOpt, 0, 2)
+	if command.Subject != "" {
+		options = append(options, jetstream.WithPurgeSubject(command.Subject))
+	}
+	if command.Sequence > 0 {
+		options = append(options, jetstream.WithPurgeSequence(command.Sequence))
+	}
+	if command.Keep > 0 {
+		options = append(options, jetstream.WithPurgeKeep(command.Keep))
+	}
+	if err := stream.Purge(ctx, options...); err != nil {
+		return fmt.Errorf("purge stream %q: %w", command.Stream, err)
+	}
+	return nil
+}
+
+func (m *Monitor) DeleteStreamMessage(ctx context.Context, command streams.MessageDeleteCommand) error {
+	stream, err := m.jetstream.Stream(ctx, command.Stream)
+	if err != nil {
+		return fmt.Errorf("open stream %q: %w", command.Stream, err)
+	}
+	if command.Secure {
+		err = stream.SecureDeleteMsg(ctx, command.Sequence)
+	} else {
+		err = stream.DeleteMsg(ctx, command.Sequence)
+	}
+	if err != nil {
+		return fmt.Errorf("delete message %d from stream %q: %w", command.Sequence, command.Stream, err)
+	}
+	return nil
+}
+
 func streamConfig(definition streams.Definition) jetstream.StreamConfig {
 	config := jetstream.StreamConfig{
 		Name:              definition.Name,
@@ -947,6 +996,181 @@ func applyStreamDefinition(config *jetstream.StreamConfig, definition streams.De
 	config.MaxMsgs = definition.MaxMessages
 	config.MaxBytes = definition.MaxBytes
 	config.Replicas = definition.Replicas
+	config.MaxAge = definition.MaxAge
+	if definition.MaxMessageSize != 0 {
+		config.MaxMsgSize = definition.MaxMessageSize
+	}
+	if definition.MaxMessagesPerSubject != 0 {
+		config.MaxMsgsPerSubject = definition.MaxMessagesPerSubject
+	}
+	if definition.MaxConsumers != 0 {
+		config.MaxConsumers = definition.MaxConsumers
+	}
+	config.Duplicates = definition.DuplicateWindow
+	if definition.Discard == streams.DiscardNew {
+		config.Discard = jetstream.DiscardNew
+	} else {
+		config.Discard = jetstream.DiscardOld
+	}
+	config.DiscardNewPerSubject = definition.DiscardNewPerSubject
+	config.Compression = jetstream.NoCompression
+	if definition.Compression {
+		config.Compression = jetstream.S2Compression
+	}
+	config.AllowDirect, config.MirrorDirect = definition.AllowDirect, definition.MirrorDirect
+	config.AllowRollup, config.DenyDelete, config.DenyPurge = definition.AllowRollup, definition.DenyDelete, definition.DenyPurge
+	config.Sealed, config.NoAck, config.AllowMsgTTL = definition.Sealed, definition.NoAck, definition.AllowMessageTTL
+	if definition.PlacementCluster != "" || len(definition.PlacementTags) > 0 {
+		config.Placement = &jetstream.Placement{Cluster: definition.PlacementCluster, Tags: append([]string(nil), definition.PlacementTags...)}
+	} else {
+		config.Placement = nil
+	}
+	config.Metadata = cloneStringMap(definition.Metadata)
+	config.SubjectTransform = streamSubjectTransformToNATS(definition.SubjectTransform)
+	config.RePublish = streamRepublishToNATS(definition.Republish)
+	config.Mirror = streamSourceToNATS(definition.Mirror)
+	config.Sources = make([]*jetstream.StreamSource, 0, len(definition.Sources))
+	for i := range definition.Sources {
+		config.Sources = append(config.Sources, streamSourceToNATS(&definition.Sources[i]))
+	}
+}
+
+func streamDiscard(value jetstream.DiscardPolicy) streams.Discard {
+	if value == jetstream.DiscardNew {
+		return streams.DiscardNew
+	}
+	return streams.DiscardOld
+}
+
+func streamPlacementCluster(value *jetstream.Placement) string {
+	if value == nil {
+		return ""
+	}
+	return value.Cluster
+}
+
+func streamPlacementTags(value *jetstream.Placement) []string {
+	if value == nil {
+		return nil
+	}
+	return append([]string(nil), value.Tags...)
+}
+
+func cloneStringMap(value map[string]string) map[string]string {
+	if value == nil {
+		return nil
+	}
+	result := make(map[string]string, len(value))
+	for key, item := range value {
+		result[key] = item
+	}
+	return result
+}
+
+func streamSubjectTransform(value *jetstream.SubjectTransformConfig) *streams.SubjectTransform {
+	if value == nil {
+		return nil
+	}
+	return &streams.SubjectTransform{Source: value.Source, Destination: value.Destination}
+}
+
+func streamSubjectTransformToNATS(value *streams.SubjectTransform) *jetstream.SubjectTransformConfig {
+	if value == nil {
+		return nil
+	}
+	return &jetstream.SubjectTransformConfig{Source: value.Source, Destination: value.Destination}
+}
+
+func streamRepublish(value *jetstream.RePublish) *streams.Republish {
+	if value == nil {
+		return nil
+	}
+	return &streams.Republish{Source: value.Source, Destination: value.Destination, HeadersOnly: value.HeadersOnly}
+}
+
+func streamRepublishToNATS(value *streams.Republish) *jetstream.RePublish {
+	if value == nil {
+		return nil
+	}
+	return &jetstream.RePublish{Source: value.Source, Destination: value.Destination, HeadersOnly: value.HeadersOnly}
+}
+
+func streamSourceFromNATS(value *jetstream.StreamSource) *streams.Source {
+	if value == nil {
+		return nil
+	}
+	result := &streams.Source{Name: value.Name, StartSequence: value.OptStartSeq, StartTime: value.OptStartTime, FilterSubject: value.FilterSubject}
+	for _, transform := range value.SubjectTransforms {
+		result.SubjectTransforms = append(result.SubjectTransforms, streams.SubjectTransform{Source: transform.Source, Destination: transform.Destination})
+	}
+	if value.External != nil {
+		result.External = &streams.External{APIPrefix: value.External.APIPrefix, DeliverPrefix: value.External.DeliverPrefix}
+	}
+	return result
+}
+
+func streamSourcesFromNATS(values []*jetstream.StreamSource) []streams.Source {
+	result := make([]streams.Source, 0, len(values))
+	for _, value := range values {
+		if mapped := streamSourceFromNATS(value); mapped != nil {
+			result = append(result, *mapped)
+		}
+	}
+	return result
+}
+
+func streamSourceToNATS(value *streams.Source) *jetstream.StreamSource {
+	if value == nil {
+		return nil
+	}
+	result := &jetstream.StreamSource{Name: value.Name, OptStartSeq: value.StartSequence, OptStartTime: value.StartTime, FilterSubject: value.FilterSubject}
+	for _, transform := range value.SubjectTransforms {
+		result.SubjectTransforms = append(result.SubjectTransforms, jetstream.SubjectTransformConfig{Source: transform.Source, Destination: transform.Destination})
+	}
+	if value.External != nil {
+		result.External = &jetstream.ExternalStream{APIPrefix: value.External.APIPrefix, DeliverPrefix: value.External.DeliverPrefix}
+	}
+	return result
+}
+
+func streamClusterName(value *jetstream.ClusterInfo) string {
+	if value == nil {
+		return ""
+	}
+	return value.Name
+}
+func streamLeader(value *jetstream.ClusterInfo) string {
+	if value == nil {
+		return ""
+	}
+	return value.Leader
+}
+func streamReplicaHealth(value *jetstream.ClusterInfo) []streams.ReplicaHealth {
+	if value == nil {
+		return nil
+	}
+	result := make([]streams.ReplicaHealth, 0, len(value.Replicas))
+	for _, peer := range value.Replicas {
+		if peer != nil {
+			result = append(result, streams.ReplicaHealth{Name: peer.Name, Current: peer.Current, Offline: peer.Offline, Active: peer.Active, Lag: peer.Lag})
+		}
+	}
+	return result
+}
+func streamSourceHealth(value *jetstream.StreamSourceInfo) *streams.SourceHealth {
+	if value == nil {
+		return nil
+	}
+	return &streams.SourceHealth{Name: value.Name, Lag: value.Lag, Active: value.Active}
+}
+func streamSourcesHealth(values []*jetstream.StreamSourceInfo) []streams.SourceHealth {
+	result := make([]streams.SourceHealth, 0, len(values))
+	for _, value := range values {
+		if mapped := streamSourceHealth(value); mapped != nil {
+			result = append(result, *mapped)
+		}
+	}
+	return result
 }
 
 func streamStorage(storage jetstream.StorageType) streams.Storage {

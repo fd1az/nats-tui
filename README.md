@@ -64,10 +64,37 @@ retry after two seconds. Results from an old connection generation are ignored.
 The Streams workspace supports full inspection and safe management. Enter opens
 stream detail, m opens its message monitor, n creates a stream, e edits the
 selected stream, and d opens destructive delete confirmation. Forms expose name,
-description, subjects, storage, retention, message/byte limits, and replicas;
-navigate with Tab, change choices with arrow keys, and save with Ctrl+S. During
-updates, immutable name/storage fields are locked and unexposed advanced NATS
-configuration is preserved.
+description, subjects, storage, retention, limits, discard/compression, placement,
+metadata, transforms, republish, mirrors, sources, and safety controls. The
+centered form scrolls around the active field; navigate with Tab, change choices
+with arrow keys, and save with Ctrl+S. Irreversible sealing requires a second
+Ctrl+S confirmation. During updates, immutable name/storage fields are locked
+and source details that were not changed are preserved.
+Stream detail also renders cluster leadership, replica current/offline state,
+peer lag, and a compact upstream dependency chain with mirror/source lag.
+
+Press `P` on a stream to open guided purge. It supports the whole stream, a
+subject filter, a sequence boundary, or keeping the newest N messages and always
+requires a second confirmation. Advanced stream operations are equally
+scriptable:
+
+    nats-tui stream create ORDERS \
+      --subject 'orders.>' --max-age 168h --max-messages-per-subject 10000 \
+      --discard old --compression --allow-direct \
+      --placement-tag ssd --metadata owner=platform
+
+    nats-tui stream create ORDERS_EU \
+      --mirror ORDERS --mirror-filter 'orders.eu.>' \
+      --mirror-start-sequence 42 --mirror-direct
+
+    nats-tui stream create ALL_ORDERS \
+      --source-config '{"name":"ORDERS_EU","filter_subject":"orders.eu.>"}' \
+      --source-config '{"name":"ORDERS_US","filter_subject":"orders.us.>"}'
+
+    nats-tui stream edit ORDERS --max-age 336h --compression=false
+    nats-tui stream purge ORDERS --subject 'orders.expired.>' --keep 10 --yes
+    nats-tui stream delete-message ORDERS 421 --secure --yes
+    nats-tui stream export ORDERS
 
 The Subject Explorer derives a navigable tree from every configured stream
 subject. It supports reactive `/` search across subject patterns and owning

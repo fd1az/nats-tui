@@ -57,6 +57,7 @@ type StopWatchFunc func()
 type RefreshFunc func(uint64) tea.Cmd
 type ConsumerActionFunc func(ConsumerActionInput) tea.Cmd
 type StreamActionFunc func(StreamActionInput) tea.Cmd
+type StreamPurgeFunc func(StreamPurgeInput) tea.Cmd
 type KeyValueCreateFunc func(KeyValueCreateInput) tea.Cmd
 type KeyValueUpdateFunc func(KeyValueUpdateInput) tea.Cmd
 type KeyValueDeleteFunc func(KeyValueDeleteInput) tea.Cmd
@@ -115,6 +116,11 @@ type StreamActionInput struct {
 	Definition streams.Definition
 }
 
+type StreamPurgeInput struct {
+	Generation uint64
+	Command    streams.PurgeCommand
+}
+
 type KeyValueCreateInput struct {
 	Generation uint64
 	Definition kvstore.Definition
@@ -156,6 +162,7 @@ type Model struct {
 	refresh                      RefreshFunc
 	consumerAction               ConsumerActionFunc
 	streamAction                 StreamActionFunc
+	streamPurge                  StreamPurgeFunc
 	keyValueCreate               KeyValueCreateFunc
 	keyValueUpdate               KeyValueUpdateFunc
 	keyValueDelete               KeyValueDeleteFunc
@@ -202,6 +209,7 @@ type Model struct {
 	streams                      []streams.Summary
 	streamCursor                 int
 	streamForm                   *streamForm
+	streamPurgeForm              *streamPurgeForm
 	showStreamDetail             bool
 	confirmStreamDelete          bool
 	streamActionRunning          bool
@@ -378,6 +386,11 @@ type streamActionFailedMsg struct {
 	input StreamActionInput
 	err   error
 }
+type streamPurgeSucceededMsg struct{ input StreamPurgeInput }
+type streamPurgeFailedMsg struct {
+	input StreamPurgeInput
+	err   error
+}
 type keyValueCreateSucceededMsg struct{ input KeyValueCreateInput }
 type keyValueCreateFailedMsg struct {
 	input KeyValueCreateInput
@@ -551,6 +564,11 @@ func (m Model) WithStreamActions(action StreamActionFunc) Model {
 	return m
 }
 
+func (m Model) WithStreamPurge(purge StreamPurgeFunc) Model {
+	m.streamPurge = purge
+	return m
+}
+
 func (m Model) WithKeyValueCreate(create KeyValueCreateFunc) Model {
 	m.keyValueCreate = create
 	return m
@@ -710,6 +728,11 @@ func StreamActionSucceeded(generation uint64, input StreamActionInput) tea.Msg {
 func StreamActionFailed(generation uint64, input StreamActionInput, err error) tea.Msg {
 	input.Generation = generation
 	return streamActionFailedMsg{input: input, err: err}
+}
+
+func StreamPurgeSucceeded(input StreamPurgeInput) tea.Msg { return streamPurgeSucceededMsg{input} }
+func StreamPurgeFailed(input StreamPurgeInput, err error) tea.Msg {
+	return streamPurgeFailedMsg{input, err}
 }
 
 func KeyValueCreateSucceeded(generation uint64, definition kvstore.Definition) tea.Msg {
@@ -1001,6 +1024,20 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.streamActionRunning = false
 		m.streamActionErr = msg.err
+		return m, nil
+	case streamPurgeSucceededMsg:
+		if msg.input.Generation != m.refreshGeneration {
+			return m, nil
+		}
+		m.streamActionRunning, m.streamActionErr, m.streamPurgeForm = false, nil, nil
+		m.streamActionNotice = "purge completed for " + msg.input.Command.Stream
+		m.refreshGeneration++
+		return m.startRefresh()
+	case streamPurgeFailedMsg:
+		if msg.input.Generation != m.refreshGeneration {
+			return m, nil
+		}
+		m.streamActionRunning, m.streamActionErr = false, msg.err
 		return m, nil
 	case keyValueCreateSucceededMsg:
 		if msg.input.Generation != m.refreshGeneration {
@@ -1804,6 +1841,9 @@ func (m Model) updateWorkspace(message tea.Msg) (tea.Model, tea.Cmd) {
 	if m.streamForm != nil {
 		return m.updateStreamForm(key)
 	}
+	if m.streamPurgeForm != nil {
+		return m.updateStreamPurgeForm(key)
+	}
 	if m.keyValueForm != nil {
 		return m.updateKeyValueForm(key)
 	}
@@ -2020,6 +2060,12 @@ func (m Model) updateWorkspace(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.keyValueCreateErr = nil
 		}
 	case "P":
+		if m.activeWorkspace == 1 && len(m.streams) > 0 && !m.streamActionRunning {
+			form := newStreamPurgeForm(m.streams[m.streamCursor])
+			m.streamPurgeForm = &form
+			m.streamActionErr = nil
+			return m, nil
+		}
 		if m.activeWorkspace == 4 && m.showKeyValueEntry && m.keyValueEntry != nil && !m.keyValueEntrySaving {
 			m.pendingKeyValueEntryRemoval = kvstore.RemovePurge
 			m.keyValueEntryWriteErr = nil
@@ -2855,6 +2901,9 @@ func (m Model) workspaceView(width, height int) string {
 	}
 	if m.streamForm != nil {
 		return m.streamFormView(width, height)
+	}
+	if m.streamPurgeForm != nil {
+		return m.streamPurgeFormView(width, height)
 	}
 	if m.confirmStreamDelete && len(m.streams) > 0 {
 		return m.streamDeleteConfirmationView(width, height)

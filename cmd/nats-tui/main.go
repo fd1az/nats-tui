@@ -41,6 +41,7 @@ func main() {
 		ObjectBucketCreator:    runner,
 		ObjectBucketUpdater:    runner,
 		ObjectBucketDeleter:    runner,
+		Streams:                runner,
 		CorePublisher:          runner,
 		CoreRequester:          runner,
 		RequestHistory:         runner,

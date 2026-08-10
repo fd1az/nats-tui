@@ -773,7 +773,7 @@ func TestConsumerOperationsPauseResumeResetAndDelete(t *testing.T) {
 	}
 }
 
-func TestStreamOperationsCreateUpdatePreservingAdvancedConfigAndDelete(t *testing.T) {
+func TestStreamOperationsCreateAdvancedUpdateAndDelete(t *testing.T) {
 	server := os.Getenv("NATS_TUI_TEST_SERVER")
 	if server == "" {
 		t.Skip("NATS_TUI_TEST_SERVER is not set")
@@ -816,6 +816,7 @@ func TestStreamOperationsCreateUpdatePreservingAdvancedConfigAndDelete(t *testin
 	}
 	definition.Description = "updated safely"
 	definition.MaxMessages = 200
+	definition.AllowDirect = true
 	if err := monitor.OperateStream(ctx, appstreams.Command{Action: appstreams.ActionUpdate, Name: name, Definition: definition}); err != nil {
 		t.Fatalf("update stream error = %v", err)
 	}
@@ -823,10 +824,95 @@ func TestStreamOperationsCreateUpdatePreservingAdvancedConfigAndDelete(t *testin
 	if err != nil || info.Config.Description != "updated safely" || info.Config.MaxMsgs != 200 || !info.Config.AllowDirect {
 		t.Fatalf("updated config = %#v, error=%v", info.Config, err)
 	}
+	for index := 0; index < 3; index++ {
+		if _, err := monitor.jetstream.Publish(ctx, strings.TrimSuffix(subject, ".>")+".created", []byte(fmt.Sprintf(`{"id":%d}`, index))); err != nil {
+			t.Fatalf("publish test message: %v", err)
+		}
+	}
+	if err := monitor.PurgeStream(ctx, appstreams.PurgeCommand{Stream: name, Keep: 1}); err != nil {
+		t.Fatalf("purge stream: %v", err)
+	}
+	info, err = stream.Info(ctx)
+	if err != nil || info.State.Msgs != 1 {
+		t.Fatalf("messages after purge=%d error=%v", info.State.Msgs, err)
+	}
+	if err := monitor.DeleteStreamMessage(ctx, appstreams.MessageDeleteCommand{Stream: name, Sequence: info.State.LastSeq, Secure: true}); err != nil {
+		t.Fatalf("secure delete message: %v", err)
+	}
+	info, err = stream.Info(ctx)
+	if err != nil || info.State.Msgs != 0 {
+		t.Fatalf("messages after delete=%d error=%v", info.State.Msgs, err)
+	}
 	if err := monitor.OperateStream(ctx, appstreams.Command{Action: appstreams.ActionDelete, Name: name}); err != nil {
 		t.Fatalf("delete stream error = %v", err)
 	}
 	if _, err := monitor.jetstream.Stream(ctx, name); err == nil {
 		t.Fatal("stream still exists after delete")
+	}
+}
+
+func TestStreamMirrorAndMultipleSources(t *testing.T) {
+	server := os.Getenv("NATS_TUI_TEST_SERVER")
+	if server == "" {
+		t.Skip("NATS_TUI_TEST_SERVER is not set")
+	}
+	monitor, err := Connect(config.Settings{Server: server})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(monitor.Close)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	suffix := time.Now().UnixNano()
+	originA, originB := fmt.Sprintf("NATS_TUI_ORIGIN_A_%d", suffix), fmt.Sprintf("NATS_TUI_ORIGIN_B_%d", suffix)
+	mirror, aggregate := fmt.Sprintf("NATS_TUI_MIRROR_%d", suffix), fmt.Sprintf("NATS_TUI_AGGREGATE_%d", suffix)
+	for _, name := range []string{aggregate, mirror, originB, originA} {
+		name := name
+		t.Cleanup(func() {
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cleanupCancel()
+			_ = monitor.jetstream.DeleteStream(cleanupCtx, name)
+		})
+	}
+	base := func(name, subject string) appstreams.Definition {
+		return appstreams.Definition{Name: name, Subjects: []string{subject}, Storage: appstreams.StorageMemory, Retention: appstreams.RetentionLimits, MaxMessages: -1, MaxBytes: -1, MaxMessagesPerSubject: -1, MaxMessageSize: -1, MaxConsumers: -1, Replicas: 1, Discard: appstreams.DiscardOld}
+	}
+	originADefinition := base(originA, fmt.Sprintf("origin.a.%d.>", suffix))
+	originADefinition.AllowDirect = true
+	for _, definition := range []appstreams.Definition{originADefinition, base(originB, fmt.Sprintf("origin.b.%d.>", suffix))} {
+		if err := monitor.OperateStream(ctx, appstreams.Command{Action: appstreams.ActionCreate, Name: definition.Name, Definition: definition}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mirrorDefinition := base(mirror, "")
+	mirrorDefinition.Subjects = nil
+	mirrorDefinition.Mirror = &appstreams.Source{Name: originA, StartSequence: 1}
+	mirrorDefinition.MirrorDirect = true
+	if err := monitor.OperateStream(ctx, appstreams.Command{Action: appstreams.ActionCreate, Name: mirror, Definition: mirrorDefinition}); err != nil {
+		t.Fatalf("create mirror: %v", err)
+	}
+	aggregateDefinition := base(aggregate, "")
+	aggregateDefinition.Subjects = nil
+	aggregateDefinition.Sources = []appstreams.Source{{Name: originA}, {Name: originB}}
+	if err := monitor.OperateStream(ctx, appstreams.Command{Action: appstreams.ActionCreate, Name: aggregate, Definition: aggregateDefinition}); err != nil {
+		t.Fatalf("create aggregate: %v", err)
+	}
+	items, err := monitor.ListStreams(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seenMirror, seenAggregate := false, false
+	var mirrorItem appstreams.Summary
+	for _, item := range items {
+		if item.Name == mirror {
+			mirrorItem = item
+			seenMirror = item.Mirror != nil && item.Mirror.Name == originA && item.MirrorDirect
+		}
+		if item.Name == aggregate {
+			seenAggregate = len(item.Sources) == 2 && item.Sources[0].Name == originA && item.Sources[1].Name == originB
+		}
+	}
+	if !seenMirror || !seenAggregate {
+		t.Fatalf("mirror=%v aggregate=%v mirror_item=%+v", seenMirror, seenAggregate, mirrorItem)
 	}
 }
