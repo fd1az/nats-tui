@@ -2023,6 +2023,35 @@ func TestRequestReplyWorkspaceFitsNarrowViewport(t *testing.T) {
 	}
 }
 
+func TestRequestReplyComposerAcceptsDigitsShowsCursorAndEscapeLeavesWorkspace(t *testing.T) {
+	t.Parallel()
+	model := dashboardModel(t, 100, 28)
+	enteredValue, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'8'}})
+	entered := enteredValue.(Model)
+	if entered.activeWorkspace != 7 {
+		t.Fatalf("workspace=%d, want publish/request", entered.activeWorkspace)
+	}
+	if entered.requestReply.subject.Cursor.Mode().String() == "hidden" {
+		t.Fatal("focused composer cursor is hidden")
+	}
+	secondValue, _ := entered.Update(tea.KeyMsg{Type: tea.KeyTab})
+	thirdValue, _ := secondValue.(Model).Update(tea.KeyMsg{Type: tea.KeyTab})
+	payload := thirdValue.(Model)
+	if payload.requestReply.focus != 2 {
+		t.Fatalf("focus=%d, want payload", payload.requestReply.focus)
+	}
+	typedValue, _ := payload.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
+	typed := typedValue.(Model)
+	if typed.activeWorkspace != 7 || typed.requestReply.payload.Value() != "1" {
+		t.Fatalf("digit switched workspace or was lost: workspace=%d payload=%q", typed.activeWorkspace, typed.requestReply.payload.Value())
+	}
+	leftValue, _ := typed.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	left := leftValue.(Model)
+	if left.activeWorkspace != 0 {
+		t.Fatalf("escape left workspace=%d, want dashboard", left.activeWorkspace)
+	}
+}
+
 func newTestModel(connect ConnectFunc) Model {
 	return NewModel("local", "nats://127.0.0.1:4222", connect)
 }

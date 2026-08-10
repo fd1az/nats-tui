@@ -132,8 +132,8 @@ func requestTextInput(colors theme, placeholder string) textinput.Model {
 	input.CharLimit = 4096
 	input.PromptStyle = lipgloss.NewStyle().Foreground(colors.accent)
 	input.TextStyle = lipgloss.NewStyle().Foreground(colors.primary)
-	input.Cursor.Style = lipgloss.NewStyle().Foreground(colors.cyan)
-	input.Cursor.SetMode(cursor.CursorHide)
+	input.Cursor.Style = lipgloss.NewStyle().Foreground(colors.cyan).Underline(true)
+	input.Cursor.SetMode(cursor.CursorStatic)
 	return input
 }
 
@@ -142,8 +142,8 @@ func newRequestTextarea(colors theme) textarea.Model {
 	input.Placeholder = "JSON, text, or any UTF-8 payload"
 	input.Prompt = ""
 	input.ShowLineNumbers = true
-	input.Cursor.Style = lipgloss.NewStyle().Foreground(colors.cyan)
-	input.Cursor.SetMode(cursor.CursorHide)
+	input.Cursor.Style = lipgloss.NewStyle().Foreground(colors.cyan).Underline(true)
+	input.Cursor.SetMode(cursor.CursorStatic)
 	for _, style := range []*textarea.Style{&input.FocusedStyle, &input.BlurredStyle} {
 		style.Base = lipgloss.NewStyle()
 		style.CursorLine = lipgloss.NewStyle().Foreground(colors.primary)
@@ -162,17 +162,21 @@ func (m Model) WithRequestReply(services RequestReplyServices) Model {
 }
 
 func (m Model) updateRequestReplyKey(key tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
-	if len(key.String()) == 1 && ((key.String()[0] >= '1' && key.String()[0] <= '9') || key.String()[0] == '0') {
-		return m, nil, false
-	}
 	state := &m.requestReply
 	if state.running || state.loadingState {
 		return m, nil, true
 	}
 	if state.pane != requestCompose {
+		if isWorkspaceNumberKey(key.String()) {
+			return m, nil, false
+		}
 		return m.updateRequestNavigation(key)
 	}
 	switch key.String() {
+	case "esc":
+		m.activeWorkspace = 0
+		state.error = nil
+		return m, nil, true
 	case "ctrl+r":
 		state.requestMode = !state.requestMode
 		state.notice, state.error = "", nil
@@ -412,7 +416,7 @@ func (m Model) requestComposeView(width, height int) string {
 	if state.running {
 		lines = append(lines, "", lipgloss.NewStyle().Foreground(m.theme.yellow).Render(m.spinner.View()+" sending…"))
 	}
-	lines = append(lines, "", lipgloss.NewStyle().Foreground(m.theme.muted).Render("ctrl+r mode  •  tab field  •  ctrl+f format JSON  •  ctrl+l load file  •  ctrl+s send"), lipgloss.NewStyle().Foreground(m.theme.muted).Render("ctrl+t save template  •  ctrl+y copy CLI  •  ctrl+o templates  •  ctrl+h history  •  1-9/0 jump workspace"))
+	lines = append(lines, "", lipgloss.NewStyle().Foreground(m.theme.muted).Render("ctrl+r mode  •  tab field  •  ctrl+f format JSON  •  ctrl+l load file  •  ctrl+s send"), lipgloss.NewStyle().Foreground(m.theme.muted).Render("ctrl+t save template  •  ctrl+y copy CLI  •  ctrl+o templates  •  ctrl+h history  •  esc dashboard"))
 	card := lipgloss.NewStyle().Width(contentWidth).Padding(1, 2).Border(lipgloss.RoundedBorder()).BorderForeground(m.theme.border).Render(strings.Join(lines, "\n"))
 	return m.centeredCanvas(width, height, card)
 }
@@ -464,9 +468,13 @@ func (m Model) compactRequestComposeView(width, height int) string {
 	if state.notice != "" {
 		lines = append(lines, lipgloss.NewStyle().Foreground(m.theme.mint).Render("✓ "+truncate(state.notice, max(contentWidth-2, 8))))
 	}
-	lines = append(lines, lipgloss.NewStyle().Foreground(m.theme.muted).Render("tab field • ctrl+s send • ctrl+r mode"))
+	lines = append(lines, lipgloss.NewStyle().Foreground(m.theme.muted).Render("tab field • ctrl+s send • ctrl+r mode • esc dashboard"))
 	card := lipgloss.NewStyle().Width(contentWidth).Padding(0, 1).Border(lipgloss.RoundedBorder()).BorderForeground(m.theme.border).Render(strings.Join(lines, "\n"))
 	return m.centeredCanvas(width, height, card)
+}
+
+func isWorkspaceNumberKey(key string) bool {
+	return len(key) == 1 && ((key[0] >= '1' && key[0] <= '9') || key[0] == '0')
 }
 
 func (m Model) requestResultsView(width, height int) string {

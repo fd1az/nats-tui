@@ -372,6 +372,10 @@ press Ctrl+F to validate and format JSON. Ctrl+L loads the configured payload
 file without coupling Bubble Tea to the filesystem. Requests accept a timeout
 and reply limit; replies appear in a responsive list/detail view with latency,
 headers, syntax-colored JSON, and raw-text fallback.
+The active field always shows a visible cursor and accepts digits normally,
+including inside JSON payloads. Press Tab to move between fields and Escape to
+return directly to the Dashboard; workspace number shortcuts resume outside
+the composer.
 
 Ctrl+H opens persistent request history and `R` replays the selected exchange.
 Ctrl+T saves the current request as a named template; Ctrl+O lists templates,
