@@ -264,14 +264,14 @@ required system-account and decentralized-authentication APIs.
 
 ## Command Bar and Automation
 
-- [ ] Global `:` command bar.
-- [ ] Fuzzy command and resource completion.
-- [ ] Command history.
-- [ ] Built-in navigation and operation commands.
-- [ ] User-defined commands with safe argument interpolation.
-- [ ] Dry-run preview for mutating commands.
-- [ ] Generate equivalent `nats` CLI commands.
-- [ ] Non-interactive commands for scripting selected operations.
+- [x] Global `:` command bar.
+- [x] Fuzzy command and resource completion.
+- [x] Command history.
+- [x] Built-in navigation and operation commands.
+- [x] User-defined commands with safe argument interpolation.
+- [x] Dry-run preview for mutating commands.
+- [x] Generate equivalent `nats` CLI commands.
+- [x] Non-interactive commands for scripting selected operations.
 
 ## Bookmarks and Local Persistence
 

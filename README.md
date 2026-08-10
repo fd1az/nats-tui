@@ -258,6 +258,38 @@ through a shell:
     nats-tui alerts watch --notify-program ./notify \
       --notify-arg=--channel --notify-arg=nats-ops
 
+Press `:` from the workspace to open the global command bar (`Ctrl+K` also
+works, including inside the publish/request editor). Search is fuzzy across
+commands and live streams/consumers. Results are grouped into Navigate,
+Inspect, Create, Operate, and Custom actions. Mutating commands open a preview;
+destructive actions cannot bypass it. Press `C` in preview to copy the exact
+equivalent `nats` argv rendered for a shell, and `Ctrl+R` to open persistent
+profile-scoped history. Replaying history only reopens the command or its
+parameter form—it never repeats a mutation automatically.
+
+Custom commands use declared parameters and typed internal actions. Templates
+are expanded as data and never evaluated by a shell:
+
+    nats-tui commands add watch-payments \
+      --title 'Watch payment events' \
+      --action navigate.messages \
+      --parameter subject --required subject \
+      --argument 'subject={{subject}}' \
+      --equivalent-part nats --equivalent-part sub \
+      --equivalent-part '{{subject}}'
+
+    nats-tui commands preview watch-payments \
+      --value 'subject=events.payment.>'
+    nats-tui commands history --json
+    nats-tui commands delete watch-payments --yes
+
+Supported custom actions deliberately form a small allowlist:
+`navigate.workspace`, `navigate.stream`, `navigate.consumer`,
+`navigate.messages`, `form.stream.create`, `form.kv.create`,
+`form.object.create`, `operate.alerts.scan`, `operate.core.publish`, and
+`operate.core.request`. Unknown actions remain stored
+and previewable but fail closed when invoked.
+
     nats-tui --authority-dir ./private \
       --authority-operator-seed ./operator.seed
 

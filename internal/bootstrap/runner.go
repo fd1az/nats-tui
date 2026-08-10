@@ -16,6 +16,7 @@ import (
 	"github.com/clcsolutions/nats-tui/internal/adapters/localstate"
 	"github.com/clcsolutions/nats-tui/internal/adapters/natsmonitor"
 	"github.com/clcsolutions/nats-tui/internal/app/alerts"
+	appcommandbar "github.com/clcsolutions/nats-tui/internal/app/commandbar"
 	"github.com/clcsolutions/nats-tui/internal/app/connections"
 	"github.com/clcsolutions/nats-tui/internal/app/consumers"
 	"github.com/clcsolutions/nats-tui/internal/app/dashboard"
@@ -36,19 +37,20 @@ import (
 )
 
 type Runner struct {
-	objectFiles      *localfiles.ObjectTransfer
-	connect          Connector
-	copyValue        tui.CopyValueFunc
-	timeout          TimeoutFactory
-	requestHistory   requestreply.HistoryRepository
-	requestTemplates requestreply.TemplateRepository
-	clock            requestreply.Clock
-	ids              requestreply.IDGenerator
-	alertRepository  alertStore
-	readPayload      func(string) ([]byte, error)
-	authoritySigner  func([]byte) (operator.AuthoritySigner, error)
-	accountSigner    func([]byte) (operator.AuthoritySigner, error)
-	authorityStore   func(string) (operator.AuthorityRepository, error)
+	objectFiles       *localfiles.ObjectTransfer
+	connect           Connector
+	copyValue         tui.CopyValueFunc
+	timeout           TimeoutFactory
+	requestHistory    requestreply.HistoryRepository
+	requestTemplates  requestreply.TemplateRepository
+	clock             requestreply.Clock
+	ids               requestreply.IDGenerator
+	alertRepository   alertStore
+	commandRepository appcommandbar.Repository
+	readPayload       func(string) ([]byte, error)
+	authoritySigner   func([]byte) (operator.AuthoritySigner, error)
+	accountSigner     func([]byte) (operator.AuthoritySigner, error)
+	authorityStore    func(string) (operator.AuthorityRepository, error)
 }
 
 type alertStore interface {
@@ -138,6 +140,27 @@ func defaultAlertRepository(profile string) *localstate.AlertRepository {
 	return localstate.NewAlertRepository(localstate.OSStateFile{Path: filepath.Join(directory, "nats-tui", "alerts-"+profile+".json")}, 1000)
 }
 
+func defaultCommandRepository(profile string) *localstate.CommandBarRepository {
+	directory, err := os.UserConfigDir()
+	if err != nil {
+		if home, homeErr := os.UserHomeDir(); homeErr == nil {
+			directory = filepath.Join(home, ".config")
+		} else {
+			directory = "."
+		}
+	}
+	profile = strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' {
+			return r
+		}
+		return '-'
+	}, profile)
+	if profile == "" {
+		profile = "local"
+	}
+	return localstate.NewCommandBarRepository(localstate.OSStateFile{Path: filepath.Join(directory, "nats-tui", "commands-"+profile+".json")}, 200)
+}
+
 func (r Runner) WithAuthorityDependencies(operatorSigner, accountSigner func([]byte) (operator.AuthoritySigner, error), store func(string) (operator.AuthorityRepository, error)) Runner {
 	if operatorSigner == nil || accountSigner == nil || store == nil {
 		panic("authority dependencies cannot be nil")
@@ -173,6 +196,14 @@ func (r Runner) WithAlertDependencies(repository alertStore, clock requestreply.
 		panic("alert dependencies cannot be nil")
 	}
 	r.alertRepository, r.clock, r.ids = repository, clock, ids
+	return r
+}
+
+func (r Runner) WithCommandBarDependencies(repository appcommandbar.Repository, clock requestreply.Clock, ids requestreply.IDGenerator) Runner {
+	if repository == nil || clock == nil || ids == nil {
+		panic("command bar dependencies cannot be nil")
+	}
+	r.commandRepository, r.clock, r.ids = repository, clock, ids
 	return r
 }
 
@@ -1515,6 +1546,27 @@ func (r Runner) Run(ctx context.Context, settings config.Settings) error {
 			return tui.AlertsScanned(count)
 		}
 	}
+	loadCommandBar := func() tea.Cmd {
+		return func() tea.Msg {
+			custom, err := r.ListCustomCommands(ctx, activeSettings)
+			if err != nil {
+				return tui.CommandBarFailed(err)
+			}
+			history, err := r.ListCommandHistory(ctx, activeSettings, 100)
+			if err != nil {
+				return tui.CommandBarFailed(err)
+			}
+			return tui.CommandBarLoaded(custom, history)
+		}
+	}
+	recordCommand := func(id, title string, started, completed time.Time, executionErr error) tea.Cmd {
+		return func() tea.Msg {
+			if err := r.RecordCommandExecution(ctx, activeSettings, id, title, started, completed, executionErr); err != nil {
+				return tui.CommandBarFailed(err)
+			}
+			return tui.CommandRecorded()
+		}
+	}
 
 	model := tui.NewModel(settings.Profile, settings.Server, connect, loadMessages).
 		WithMessageWatch(startWatch, stopWatch).
@@ -1553,6 +1605,7 @@ func (r Runner) Run(ctx context.Context, settings config.Settings) error {
 			alertCancel()
 		}
 	}, Ack: ackAlert, AckAll: ackAllAlerts, Scan: scanAlerts})
+	model = model.WithCommandBar(tui.CommandBarServices{Load: loadCommandBar, Record: recordCommand})
 	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithContext(ctx))
 	if _, err := program.Run(); err != nil {
 		return fmt.Errorf("run terminal UI: %w", err)

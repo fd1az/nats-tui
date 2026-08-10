@@ -54,6 +54,7 @@ func main() {
 		OperatorUserCreator:    runner,
 		OperatorMutator:        runner,
 		Alerts:                 runner,
+		Commands:               runner,
 		Version: cli.BuildInfo{
 			Version: version,
 			Commit:  commit,

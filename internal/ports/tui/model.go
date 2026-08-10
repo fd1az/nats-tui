@@ -14,6 +14,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	appalerts "github.com/clcsolutions/nats-tui/internal/app/alerts"
+	appcommandbar "github.com/clcsolutions/nats-tui/internal/app/commandbar"
 	"github.com/clcsolutions/nats-tui/internal/app/consumers"
 	"github.com/clcsolutions/nats-tui/internal/app/dashboard"
 	"github.com/clcsolutions/nats-tui/internal/app/kvstore"
@@ -183,8 +184,10 @@ type Model struct {
 	connectionServices           ConnectionServices
 	operatorServices             OperatorServices
 	alertServices                AlertServices
+	commandBarServices           CommandBarServices
 	operator                     operatorState
 	alerts                       alertState
+	commandBar                   commandBarState
 	serverInput                  textinput.Model
 	spinner                      spinner.Model
 	err                          error
@@ -873,6 +876,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.alertServices.Watch != nil {
 			commands = append(commands, m.alertServices.Watch())
+		}
+		if m.commandBarServices.Load != nil {
+			commands = append(commands, m.commandBarServices.Load())
 		}
 		return m, tea.Batch(commands...)
 	case connectionFailedMsg:
@@ -1583,6 +1589,22 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.alerts.loading = false
 		m.alerts.err = msg.err
 		return m, nil
+	case commandBarLoadedMsg:
+		m.commandBar.custom = append([]appcommandbar.Entry(nil), msg.custom...)
+		m.commandBar.history = append([]appcommandbar.HistoryView(nil), msg.history...)
+		if m.commandBar.open {
+			m.commandBar.entries = builtinAndCustomCommands(m)
+			m.commandBar.index = appcommandbar.NewIndex(m.commandBar.entries)
+		}
+		return m, nil
+	case commandBarFailedMsg:
+		m.commandBar.err = msg.err
+		return m, nil
+	case commandRecordedMsg:
+		if m.commandBarServices.Load != nil {
+			return m, m.commandBarServices.Load()
+		}
+		return m, nil
 	}
 
 	switch m.screen {
@@ -1633,6 +1655,13 @@ func (m Model) updateWorkspace(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.spinner, command = m.spinner.Update(message)
 			return m, command
 		}
+		return m, nil
+	}
+	if m.commandBar.open {
+		return m.updateCommandBar(key)
+	}
+	if key.String() == "ctrl+k" || (key.String() == ":" && m.activeWorkspace != 7) {
+		m.openCommandBar(commandPalette)
 		return m, nil
 	}
 	if m.activeWorkspace == 7 {
@@ -1729,6 +1758,14 @@ func (m Model) updateWorkspace(message tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if m.activeWorkspace == 4 && (m.showKeyValueHistory || m.keyValueHistoryErr != nil) {
 		return m.updateKeyValueHistoryNavigation(key)
+	}
+	if key.String() == ":" {
+		m.openCommandBar(commandPalette)
+		return m, nil
+	}
+	if key.String() == "ctrl+r" {
+		m.openCommandBar(commandHistory)
+		return m, nil
 	}
 
 	switch key.String() {
@@ -2723,6 +2760,9 @@ func (m Model) centeredCanvas(width, height int, content string) string {
 }
 
 func (m Model) workspaceView(width, height int) string {
+	if m.commandBar.open {
+		return m.commandBarView(width, height)
+	}
 	if m.keyValueEntryForm != nil {
 		return m.keyValueEntryFormView(width, height)
 	}
@@ -2759,7 +2799,7 @@ func (m Model) workspaceView(width, height int) string {
 	content := m.workspaceContent(contentWidth, contentAvailable)
 	footer := lipgloss.NewStyle().
 		Foreground(m.theme.muted).
-		Render("←/→ navigate   1-9/0/A/! jump   r refresh   c profiles   ? help   q quit")
+		Render(": commands   ctrl+r history   ←/→ navigate   r refresh   c profiles   ? help   q quit")
 
 	top := strings.Join([]string{header, tabs, "", content}, "\n")
 	availableGap := max(contentHeight-lipgloss.Height(top)-lipgloss.Height(footer), 0)
@@ -3381,7 +3421,7 @@ func (m Model) card(label, value, caption string, color lipgloss.Color, width in
 
 func (m Model) helpView(width, height int) string {
 	title := lipgloss.NewStyle().Bold(true).Foreground(m.theme.accent).Render("Keyboard")
-	keys := "  ?         close help\n  q         quit\n  ←/→       switch workspace\n  ↑/↓ j/k   move or scroll\n  pgup/dn   jump through lists\n  g/G       first/last item (g toggles topology graph)\n  enter     open selected item\n  esc       close detail/search\n  1-9/0/A   jump to workspace\n  r         refresh now\n  c         connection profiles\n  /         reactive search\n  w         start/stop live watch\n  space     pause/resume live watch\n  p         pause/resume consumer\n  x         reset consumer / close client\n  n         new stream/KV bucket\n  e         edit stream/KV bucket\n  m         stream messages\n  d         delete selected resource\n  :         command bar\n  B         bookmark"
+	keys := "  ?         close help\n  q         quit\n  ←/→       switch workspace\n  ↑/↓ j/k   move or scroll\n  pgup/dn   jump through lists\n  g/G       first/last item (g toggles topology graph)\n  enter     open selected item\n  esc       close detail/search\n  1-9/0/A/! jump to workspace\n  r         refresh now\n  c         connection profiles\n  /         reactive search\n  w         start/stop live watch\n  space     pause/resume live watch\n  p         pause/resume consumer\n  x         reset consumer / close client\n  n         new stream/KV/object bucket\n  e         edit selected resource\n  m         stream messages\n  d         delete selected resource\n  :/ctrl+k  command bar\n  ctrl+r    command history\n  B         bookmark"
 	return lipgloss.NewStyle().
 		Width(max(width-8, 1)).
 		Height(max(height-4, 1)).
