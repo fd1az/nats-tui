@@ -27,30 +27,30 @@ type requestStateServiceStub struct {
 	deleted   string
 }
 
-func (s *requestStateServiceStub) ListRequestHistory(context.Context) ([]domain.Exchange, error) {
+func (s *requestStateServiceStub) ListRequestHistory(context.Context, config.Settings) ([]domain.Exchange, error) {
 	return s.history, nil
 }
 func (s *requestStateServiceStub) ReplayCoreRequest(_ context.Context, _ config.Settings, _ string) (domain.Exchange, error) {
 	return s.exchange, nil
 }
-func (s *requestStateServiceStub) SaveRequestTemplate(_ context.Context, template domain.Template) error {
+func (s *requestStateServiceStub) SaveRequestTemplate(_ context.Context, _ config.Settings, template domain.Template) error {
 	if s.templates == nil {
 		s.templates = make(map[string]domain.Template)
 	}
 	s.templates[template.Name()] = template
 	return nil
 }
-func (s *requestStateServiceStub) ListRequestTemplates(context.Context) ([]domain.Template, error) {
+func (s *requestStateServiceStub) ListRequestTemplates(context.Context, config.Settings) ([]domain.Template, error) {
 	result := make([]domain.Template, 0, len(s.templates))
 	for _, template := range s.templates {
 		result = append(result, template)
 	}
 	return result, nil
 }
-func (s *requestStateServiceStub) GetRequestTemplate(_ context.Context, name string) (domain.Template, error) {
+func (s *requestStateServiceStub) GetRequestTemplate(_ context.Context, _ config.Settings, name string) (domain.Template, error) {
 	return s.templates[name], nil
 }
-func (s *requestStateServiceStub) DeleteRequestTemplate(_ context.Context, name string) error {
+func (s *requestStateServiceStub) DeleteRequestTemplate(_ context.Context, _ config.Settings, name string) error {
 	s.deleted = name
 	delete(s.templates, name)
 	return nil

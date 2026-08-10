@@ -275,12 +275,12 @@ required system-account and decentralized-authentication APIs.
 
 ## Bookmarks and Local Persistence
 
-- [ ] Bookmark streams, consumers, subjects, KV buckets, keys, object buckets, and objects with `B`.
-- [ ] Global bookmarks list and quick jump.
-- [ ] Persist bookmarks across sessions.
-- [ ] Persist recent searches and request templates.
-- [ ] Profile-scoped local state.
-- [ ] Handle renamed or deleted bookmarked resources gracefully.
+- [x] Bookmark streams, consumers, subjects, KV buckets, keys, object buckets, and objects with `B`.
+- [x] Global bookmarks list and quick jump.
+- [x] Persist bookmarks across sessions.
+- [x] Persist recent searches and request templates.
+- [x] Profile-scoped local state.
+- [x] Handle renamed or deleted bookmarked resources gracefully.
 
 ## Quality, Distribution, and Operations — Partial
 

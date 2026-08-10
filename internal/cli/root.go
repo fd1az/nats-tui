@@ -98,15 +98,15 @@ type CoreRequester interface {
 }
 
 type RequestHistory interface {
-	ListRequestHistory(context.Context) ([]domainrequestreply.Exchange, error)
+	ListRequestHistory(context.Context, config.Settings) ([]domainrequestreply.Exchange, error)
 	ReplayCoreRequest(context.Context, config.Settings, string) (domainrequestreply.Exchange, error)
 }
 
 type RequestTemplates interface {
-	SaveRequestTemplate(context.Context, domainrequestreply.Template) error
-	ListRequestTemplates(context.Context) ([]domainrequestreply.Template, error)
-	GetRequestTemplate(context.Context, string) (domainrequestreply.Template, error)
-	DeleteRequestTemplate(context.Context, string) error
+	SaveRequestTemplate(context.Context, config.Settings, domainrequestreply.Template) error
+	ListRequestTemplates(context.Context, config.Settings) ([]domainrequestreply.Template, error)
+	GetRequestTemplate(context.Context, config.Settings, string) (domainrequestreply.Template, error)
+	DeleteRequestTemplate(context.Context, config.Settings, string) error
 }
 
 type BuildInfo struct {
@@ -166,6 +166,7 @@ type Dependencies struct {
 	OperatorMutator        OperatorMutator
 	Alerts                 AlertManager
 	Commands               CommandManager
+	Bookmarks              BookmarkManager
 	Clock                  Clock
 	FileSystem             FileSystem
 	Version                BuildInfo
@@ -231,6 +232,7 @@ func NewRoot(deps Dependencies) *cobra.Command {
 	root.AddCommand(newAccountsCommand(values, deps.OperatorReader, deps.OperatorAccountCreator, deps.OperatorUserCreator, deps.OperatorMutator))
 	root.AddCommand(newAlertsCommand(values, deps.Alerts))
 	root.AddCommand(newCommandsCommand(values, deps.Commands))
+	root.AddCommand(newBookmarksCommand(values, deps.Bookmarks))
 	return root
 }
 

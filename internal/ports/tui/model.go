@@ -14,6 +14,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	appalerts "github.com/clcsolutions/nats-tui/internal/app/alerts"
+	appbookmarks "github.com/clcsolutions/nats-tui/internal/app/bookmarks"
 	appcommandbar "github.com/clcsolutions/nats-tui/internal/app/commandbar"
 	"github.com/clcsolutions/nats-tui/internal/app/consumers"
 	"github.com/clcsolutions/nats-tui/internal/app/dashboard"
@@ -185,9 +186,11 @@ type Model struct {
 	operatorServices             OperatorServices
 	alertServices                AlertServices
 	commandBarServices           CommandBarServices
+	bookmarkServices             BookmarkServices
 	operator                     operatorState
 	alerts                       alertState
 	commandBar                   commandBarState
+	bookmarks                    bookmarkState
 	serverInput                  textinput.Model
 	spinner                      spinner.Model
 	err                          error
@@ -880,6 +883,10 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if m.commandBarServices.Load != nil {
 			commands = append(commands, m.commandBarServices.Load())
 		}
+		if m.bookmarkServices.Load != nil {
+			m.bookmarks.loading = true
+			commands = append(commands, m.bookmarkServices.Load(m.bookmarkInventory()))
+		}
 		return m, tea.Batch(commands...)
 	case connectionFailedMsg:
 		m.err = msg.err
@@ -1062,6 +1069,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.browsingKeyValue = true
 		m.keyValueEntry = nil
 		m.showKeyValueEntry = false
+		m.resolvePendingBookmark()
 		return m, nil
 	case keyValueKeysFailedMsg:
 		m.loadingKeyValueKeys = false
@@ -1201,6 +1209,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.rebuildObjectSearch()
 		m.objectObjectCursor = findObject(m.displayedObjects(), selectedName)
 		m.browsingObjects = true
+		m.resolvePendingBookmark()
 		return m, nil
 	case objectsFailedMsg:
 		m.loadingObjects = false
@@ -1605,6 +1614,43 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.commandBarServices.Load()
 		}
 		return m, nil
+	case bookmarksLoadedMsg:
+		m.bookmarks.loading, m.bookmarks.err = false, nil
+		m.bookmarks.items = append([]appbookmarks.View(nil), msg.items...)
+		m.bookmarks.cursor = min(m.bookmarks.cursor, max(len(m.bookmarks.items)-1, 0))
+		return m, nil
+	case bookmarksFailedMsg:
+		m.bookmarks.loading = false
+		m.bookmarks.err = msg.err
+		return m, nil
+	case bookmarkAddedMsg:
+		m.bookmarks.err = nil
+		m.bookmarks.notice = "Bookmarked " + msg.item.Label
+		replaced := false
+		for i := range m.bookmarks.items {
+			if m.bookmarks.items[i].ID == msg.item.ID {
+				m.bookmarks.items[i] = msg.item
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			m.bookmarks.items = append(m.bookmarks.items, msg.item)
+		}
+		return m, nil
+	case bookmarkRemovedMsg:
+		m.bookmarks.err = nil
+		m.bookmarks.notice = "Bookmark removed"
+		for i, item := range m.bookmarks.items {
+			if item.ID == msg.id {
+				m.bookmarks.items = append(m.bookmarks.items[:i], m.bookmarks.items[i+1:]...)
+				break
+			}
+		}
+		m.bookmarks.cursor = min(m.bookmarks.cursor, max(len(m.bookmarks.items)-1, 0))
+		return m, nil
+	case recentSearchSavedMsg:
+		return m, nil
 	}
 
 	switch m.screen {
@@ -1650,7 +1696,7 @@ func (m Model) updateConnecting(message tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) updateWorkspace(message tea.Msg) (tea.Model, tea.Cmd) {
 	key, ok := message.(tea.KeyMsg)
 	if !ok {
-		if m.loadingMessages || m.watchStarting || m.refreshing || m.keyValueEntrySaving || m.loadingKeyValueHistory || m.loadingKeyValueKeys || m.loadingKeyValueEntry || m.keyValueWatchStarting || m.loadingObjects || m.objectWatchStarting || m.objectBucketOperationRunning || m.requestReply.running || m.requestReply.loadingState || m.topology.loading || m.connections.loading || m.operator.loading || m.operator.running || m.alerts.loading {
+		if m.loadingMessages || m.watchStarting || m.refreshing || m.keyValueEntrySaving || m.loadingKeyValueHistory || m.loadingKeyValueKeys || m.loadingKeyValueEntry || m.keyValueWatchStarting || m.loadingObjects || m.objectWatchStarting || m.objectBucketOperationRunning || m.requestReply.running || m.requestReply.loadingState || m.topology.loading || m.connections.loading || m.operator.loading || m.operator.running || m.alerts.loading || m.bookmarks.loading {
 			var command tea.Cmd
 			m.spinner, command = m.spinner.Update(message)
 			return m, command
@@ -1659,6 +1705,9 @@ func (m Model) updateWorkspace(message tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if m.commandBar.open {
 		return m.updateCommandBar(key)
+	}
+	if m.bookmarks.open {
+		return m.updateBookmarks(key)
 	}
 	if key.String() == "ctrl+k" || (key.String() == ":" && m.activeWorkspace != 7) {
 		m.openCommandBar(commandPalette)
@@ -1721,16 +1770,36 @@ func (m Model) updateWorkspace(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.activeWorkspace == 3 && m.searchMode {
-		return m.updateMessageSearch(key), nil
+		query := m.searchQuery
+		updated := m.updateMessageSearch(key)
+		if !updated.searchMode && strings.TrimSpace(query) != "" && m.bookmarkServices.SaveSearch != nil {
+			return updated, m.bookmarkServices.SaveSearch("messages", query)
+		}
+		return updated, nil
 	}
 	if m.activeWorkspace == 6 && m.subjectSearchMode {
-		return m.updateSubjectSearch(key), nil
+		query := m.subjectSearchQuery
+		updated := m.updateSubjectSearch(key)
+		if !updated.subjectSearchMode && strings.TrimSpace(query) != "" && m.bookmarkServices.SaveSearch != nil {
+			return updated, m.bookmarkServices.SaveSearch("subjects", query)
+		}
+		return updated, nil
 	}
 	if m.activeWorkspace == 4 && m.keyValueKeySearchMode {
-		return m.updateKeyValueKeySearch(key), nil
+		query := m.keyValueKeyQuery
+		updated := m.updateKeyValueKeySearch(key)
+		if !updated.keyValueKeySearchMode && strings.TrimSpace(query) != "" && m.bookmarkServices.SaveSearch != nil {
+			return updated, m.bookmarkServices.SaveSearch("kv-keys", query)
+		}
+		return updated, nil
 	}
 	if m.activeWorkspace == 5 && m.objectSearchMode {
-		return m.updateObjectSearch(key), nil
+		query := m.objectSearchQuery
+		updated := m.updateObjectSearch(key)
+		if !updated.objectSearchMode && strings.TrimSpace(query) != "" && m.bookmarkServices.SaveSearch != nil {
+			return updated, m.bookmarkServices.SaveSearch("objects", query)
+		}
+		return updated, nil
 	}
 	if m.streamForm != nil {
 		return m.updateStreamForm(key)
@@ -1765,6 +1834,18 @@ func (m Model) updateWorkspace(message tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if key.String() == "ctrl+r" {
 		m.openCommandBar(commandHistory)
+		return m, nil
+	}
+	if key.String() == "B" {
+		return m.toggleBookmark()
+	}
+	if key.String() == "b" {
+		m.bookmarks.open = true
+		m.bookmarks.notice = ""
+		if m.bookmarkServices.Load != nil {
+			m.bookmarks.loading = true
+			return m, m.bookmarkServices.Load(m.bookmarkInventory())
+		}
 		return m, nil
 	}
 
@@ -2760,6 +2841,9 @@ func (m Model) centeredCanvas(width, height int, content string) string {
 }
 
 func (m Model) workspaceView(width, height int) string {
+	if m.bookmarks.open {
+		return m.bookmarksView(width, height)
+	}
 	if m.commandBar.open {
 		return m.commandBarView(width, height)
 	}
@@ -2799,7 +2883,7 @@ func (m Model) workspaceView(width, height int) string {
 	content := m.workspaceContent(contentWidth, contentAvailable)
 	footer := lipgloss.NewStyle().
 		Foreground(m.theme.muted).
-		Render(": commands   ctrl+r history   ←/→ navigate   r refresh   c profiles   ? help   q quit")
+		Render(workspaceFooter(contentWidth))
 
 	top := strings.Join([]string{header, tabs, "", content}, "\n")
 	availableGap := max(contentHeight-lipgloss.Height(top)-lipgloss.Height(footer), 0)
@@ -2811,6 +2895,17 @@ func (m Model) workspaceView(width, height int) string {
 		Foreground(m.theme.primary).
 		Padding(1, 2).
 		Render(body)
+}
+
+func workspaceFooter(width int) string {
+	switch {
+	case width >= 104:
+		return ": commands   B save   b bookmarks   ←/→ navigate   r refresh   c profiles   ? help   q quit"
+	case width >= 66:
+		return ": cmd   B save   b list   ←/→ navigate   r refresh   ? help   q quit"
+	default:
+		return ": cmd   B save   b list   ? help   q quit"
+	}
 }
 
 func (m Model) consumerConfirmationView(width, height int) string {
@@ -3421,7 +3516,7 @@ func (m Model) card(label, value, caption string, color lipgloss.Color, width in
 
 func (m Model) helpView(width, height int) string {
 	title := lipgloss.NewStyle().Bold(true).Foreground(m.theme.accent).Render("Keyboard")
-	keys := "  ?         close help\n  q         quit\n  ←/→       switch workspace\n  ↑/↓ j/k   move or scroll\n  pgup/dn   jump through lists\n  g/G       first/last item (g toggles topology graph)\n  enter     open selected item\n  esc       close detail/search\n  1-9/0/A/! jump to workspace\n  r         refresh now\n  c         connection profiles\n  /         reactive search\n  w         start/stop live watch\n  space     pause/resume live watch\n  p         pause/resume consumer\n  x         reset consumer / close client\n  n         new stream/KV/object bucket\n  e         edit selected resource\n  m         stream messages\n  d         delete selected resource\n  :/ctrl+k  command bar\n  ctrl+r    command history\n  B         bookmark"
+	keys := "  ?         close help\n  q         quit\n  ←/→       switch workspace\n  ↑/↓ j/k   move or scroll\n  pgup/dn   jump through lists\n  g/G       first/last item (g toggles topology graph)\n  enter     open selected item\n  esc       close detail/search\n  1-9/0/A/! jump to workspace\n  r         refresh now\n  c         connection profiles\n  /         reactive search\n  w         start/stop live watch\n  space     pause/resume live watch\n  p         pause/resume consumer\n  x         reset consumer / close client\n  n         new stream/KV/object bucket\n  e         edit selected resource\n  m         stream messages\n  d         delete selected resource\n  :/ctrl+k  command bar\n  ctrl+r    command history\n  B         toggle bookmark\n  b         open bookmarks"
 	return lipgloss.NewStyle().
 		Width(max(width-8, 1)).
 		Height(max(height-4, 1)).

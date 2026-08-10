@@ -2,6 +2,8 @@ package bootstrap
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,6 +18,7 @@ import (
 	"github.com/clcsolutions/nats-tui/internal/adapters/localstate"
 	"github.com/clcsolutions/nats-tui/internal/adapters/natsmonitor"
 	"github.com/clcsolutions/nats-tui/internal/app/alerts"
+	appbookmarks "github.com/clcsolutions/nats-tui/internal/app/bookmarks"
 	appcommandbar "github.com/clcsolutions/nats-tui/internal/app/commandbar"
 	"github.com/clcsolutions/nats-tui/internal/app/connections"
 	"github.com/clcsolutions/nats-tui/internal/app/consumers"
@@ -37,20 +40,25 @@ import (
 )
 
 type Runner struct {
-	objectFiles       *localfiles.ObjectTransfer
-	connect           Connector
-	copyValue         tui.CopyValueFunc
-	timeout           TimeoutFactory
-	requestHistory    requestreply.HistoryRepository
-	requestTemplates  requestreply.TemplateRepository
-	clock             requestreply.Clock
-	ids               requestreply.IDGenerator
-	alertRepository   alertStore
-	commandRepository appcommandbar.Repository
-	readPayload       func(string) ([]byte, error)
-	authoritySigner   func([]byte) (operator.AuthoritySigner, error)
-	accountSigner     func([]byte) (operator.AuthoritySigner, error)
-	authorityStore    func(string) (operator.AuthorityRepository, error)
+	objectFiles        *localfiles.ObjectTransfer
+	connect            Connector
+	copyValue          tui.CopyValueFunc
+	timeout            TimeoutFactory
+	requestHistory     requestreply.HistoryRepository
+	requestTemplates   requestreply.TemplateRepository
+	requestStateMu     *sync.Mutex
+	requestStates      map[string]*localstate.RequestRepository
+	clock              requestreply.Clock
+	ids                requestreply.IDGenerator
+	alertRepository    alertStore
+	commandRepository  appcommandbar.Repository
+	bookmarkRepository appbookmarks.Repository
+	bookmarkStateMu    *sync.Mutex
+	bookmarkStates     map[string]*localstate.BookmarkRepository
+	readPayload        func(string) ([]byte, error)
+	authoritySigner    func([]byte) (operator.AuthoritySigner, error)
+	accountSigner      func([]byte) (operator.AuthoritySigner, error)
+	authorityStore     func(string) (operator.AuthorityRepository, error)
 }
 
 type alertStore interface {
@@ -105,11 +113,12 @@ type TimeoutFactory func(context.Context, time.Duration) (context.Context, conte
 
 func NewRunner() Runner {
 	files := localfiles.NewOSObjectTransfer()
-	state := defaultRequestRepository()
 	return Runner{
 		objectFiles: &files, connect: func(settings config.Settings) (Session, error) { return natsmonitor.Connect(settings) },
 		copyValue: clipboard.WriteAll, timeout: context.WithTimeout,
-		requestHistory: state, requestTemplates: state, clock: wallClock{}, ids: nuidGenerator{},
+		requestStateMu: &sync.Mutex{}, requestStates: make(map[string]*localstate.RequestRepository),
+		bookmarkStateMu: &sync.Mutex{}, bookmarkStates: make(map[string]*localstate.BookmarkRepository),
+		clock: wallClock{}, ids: nuidGenerator{},
 		readPayload:     os.ReadFile,
 		authoritySigner: func(seed []byte) (operator.AuthoritySigner, error) { return jwtauthority.NewDefault(seed) },
 		accountSigner:   func(seed []byte) (operator.AuthoritySigner, error) { return jwtauthority.NewDefaultFromAccount(seed) },
@@ -128,15 +137,7 @@ func defaultAlertRepository(profile string) *localstate.AlertRepository {
 			directory = "."
 		}
 	}
-	profile = strings.Map(func(r rune) rune {
-		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' {
-			return r
-		}
-		return '-'
-	}, profile)
-	if profile == "" {
-		profile = "local"
-	}
+	profile = localStateProfile(profile)
 	return localstate.NewAlertRepository(localstate.OSStateFile{Path: filepath.Join(directory, "nats-tui", "alerts-"+profile+".json")}, 1000)
 }
 
@@ -149,16 +150,21 @@ func defaultCommandRepository(profile string) *localstate.CommandBarRepository {
 			directory = "."
 		}
 	}
-	profile = strings.Map(func(r rune) rune {
-		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' {
-			return r
-		}
-		return '-'
-	}, profile)
-	if profile == "" {
-		profile = "local"
-	}
+	profile = localStateProfile(profile)
 	return localstate.NewCommandBarRepository(localstate.OSStateFile{Path: filepath.Join(directory, "nats-tui", "commands-"+profile+".json")}, 200)
+}
+
+func defaultBookmarkRepository(profile string) *localstate.BookmarkRepository {
+	directory, err := os.UserConfigDir()
+	if err != nil {
+		if home, homeErr := os.UserHomeDir(); homeErr == nil {
+			directory = filepath.Join(home, ".config")
+		} else {
+			directory = "."
+		}
+	}
+	profile = localStateProfile(profile)
+	return localstate.NewBookmarkRepository(localstate.OSStateFile{Path: filepath.Join(directory, "nats-tui", "bookmarks-"+profile+".json")})
 }
 
 func (r Runner) WithAuthorityDependencies(operatorSigner, accountSigner func([]byte) (operator.AuthoritySigner, error), store func(string) (operator.AuthorityRepository, error)) Runner {
@@ -207,6 +213,14 @@ func (r Runner) WithCommandBarDependencies(repository appcommandbar.Repository, 
 	return r
 }
 
+func (r Runner) WithBookmarkDependencies(repository appbookmarks.Repository, clock requestreply.Clock, ids requestreply.IDGenerator) Runner {
+	if repository == nil || clock == nil || ids == nil {
+		panic("bookmark dependencies cannot be nil")
+	}
+	r.bookmarkRepository, r.clock, r.ids = repository, clock, ids
+	return r
+}
+
 func (r Runner) WithPayloadReader(read func(string) ([]byte, error)) Runner {
 	if read == nil {
 		panic("nil payload reader")
@@ -223,7 +237,7 @@ type nuidGenerator struct{}
 
 func (nuidGenerator) Next() string { return nuid.Next() }
 
-func defaultRequestRepository() *localstate.RequestRepository {
+func defaultRequestRepository(profile string) *localstate.RequestRepository {
 	directory, err := os.UserConfigDir()
 	if err != nil {
 		if home, homeErr := os.UserHomeDir(); homeErr == nil {
@@ -232,8 +246,46 @@ func defaultRequestRepository() *localstate.RequestRepository {
 			directory = "."
 		}
 	}
-	file := localstate.OSStateFile{Path: filepath.Join(directory, "nats-tui", "request-reply.json")}
+	profile = localStateProfile(profile)
+	file := localstate.OSStateFile{Path: filepath.Join(directory, "nats-tui", "request-reply-"+profile+".json")}
 	return localstate.NewRequestRepository(file, 100)
+}
+
+func localStateProfile(profile string) string {
+	original := profile
+	profile = strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' {
+			return r
+		}
+		return '-'
+	}, profile)
+	if profile == "" {
+		return "local"
+	}
+	if profile != original {
+		digest := sha256.Sum256([]byte(original))
+		profile += "-" + hex.EncodeToString(digest[:4])
+	}
+	return profile
+}
+
+func (r Runner) requestRepositories(profile string) (requestreply.HistoryRepository, requestreply.TemplateRepository) {
+	if r.requestHistory != nil && r.requestTemplates != nil {
+		return r.requestHistory, r.requestTemplates
+	}
+	profile = localStateProfile(profile)
+	if r.requestStateMu == nil || r.requestStates == nil {
+		state := defaultRequestRepository(profile)
+		return state, state
+	}
+	r.requestStateMu.Lock()
+	defer r.requestStateMu.Unlock()
+	state, ok := r.requestStates[profile]
+	if !ok {
+		state = defaultRequestRepository(profile)
+		r.requestStates[profile] = state
+	}
+	return state, state
 }
 
 func (r Runner) connector() Connector {
@@ -492,11 +544,13 @@ func (r Runner) SendCoreRequest(ctx context.Context, settings config.Settings, r
 		return domainrequestreply.Exchange{}, err
 	}
 	defer monitor.Close()
-	return r.requestHandler(monitor).Handle(ctx, request)
+	history, _ := r.requestRepositories(settings.Profile)
+	return r.requestHandler(monitor, history).Handle(ctx, request)
 }
 
-func (r Runner) ListRequestHistory(ctx context.Context) ([]domainrequestreply.Exchange, error) {
-	return requestreply.NewListHistoryHandler(r.requestHistory).Handle(ctx)
+func (r Runner) ListRequestHistory(ctx context.Context, settings config.Settings) ([]domainrequestreply.Exchange, error) {
+	history, _ := r.requestRepositories(settings.Profile)
+	return requestreply.NewListHistoryHandler(history).Handle(ctx)
 }
 
 func (r Runner) ReplayCoreRequest(ctx context.Context, settings config.Settings, id string) (domainrequestreply.Exchange, error) {
@@ -505,27 +559,32 @@ func (r Runner) ReplayCoreRequest(ctx context.Context, settings config.Settings,
 		return domainrequestreply.Exchange{}, err
 	}
 	defer monitor.Close()
-	return requestreply.NewReplayHandler(r.requestHistory, r.requestHandler(monitor)).Handle(ctx, id)
+	history, _ := r.requestRepositories(settings.Profile)
+	return requestreply.NewReplayHandler(history, r.requestHandler(monitor, history)).Handle(ctx, id)
 }
 
-func (r Runner) SaveRequestTemplate(ctx context.Context, template domainrequestreply.Template) error {
-	return requestreply.NewSaveTemplateHandler(r.requestTemplates).Handle(ctx, template)
+func (r Runner) SaveRequestTemplate(ctx context.Context, settings config.Settings, template domainrequestreply.Template) error {
+	_, templates := r.requestRepositories(settings.Profile)
+	return requestreply.NewSaveTemplateHandler(templates).Handle(ctx, template)
 }
 
-func (r Runner) ListRequestTemplates(ctx context.Context) ([]domainrequestreply.Template, error) {
-	return requestreply.NewListTemplatesHandler(r.requestTemplates).Handle(ctx)
+func (r Runner) ListRequestTemplates(ctx context.Context, settings config.Settings) ([]domainrequestreply.Template, error) {
+	_, templates := r.requestRepositories(settings.Profile)
+	return requestreply.NewListTemplatesHandler(templates).Handle(ctx)
 }
 
-func (r Runner) GetRequestTemplate(ctx context.Context, name string) (domainrequestreply.Template, error) {
-	return requestreply.NewGetTemplateHandler(r.requestTemplates).Handle(ctx, name)
+func (r Runner) GetRequestTemplate(ctx context.Context, settings config.Settings, name string) (domainrequestreply.Template, error) {
+	_, templates := r.requestRepositories(settings.Profile)
+	return requestreply.NewGetTemplateHandler(templates).Handle(ctx, name)
 }
 
-func (r Runner) DeleteRequestTemplate(ctx context.Context, name string) error {
-	return requestreply.NewDeleteTemplateHandler(r.requestTemplates).Handle(ctx, name)
+func (r Runner) DeleteRequestTemplate(ctx context.Context, settings config.Settings, name string) error {
+	_, templates := r.requestRepositories(settings.Profile)
+	return requestreply.NewDeleteTemplateHandler(templates).Handle(ctx, name)
 }
 
-func (r Runner) requestHandler(requester requestreply.Requester) requestreply.SendRequestHandler {
-	return requestreply.NewSendRequestHandler(requester, r.requestHistory, r.clock, r.ids, r.withTimeout)
+func (r Runner) requestHandler(requester requestreply.Requester, history requestreply.HistoryRepository) requestreply.SendRequestHandler {
+	return requestreply.NewSendRequestHandler(requester, history, r.clock, r.ids, r.withTimeout)
 }
 
 func (r Runner) CreateKeyValueBucket(ctx context.Context, settings config.Settings, definition kvstore.Definition) error {
@@ -1163,7 +1222,8 @@ func (r Runner) Run(ctx context.Context, settings config.Settings) error {
 			if monitor == nil {
 				return tui.CoreRequestFailed(fmt.Errorf("no active NATS connection"))
 			}
-			exchange, err := r.requestHandler(monitor).Handle(ctx, request)
+			history, _ := r.requestRepositories(activeSettings.Profile)
+			exchange, err := r.requestHandler(monitor, history).Handle(ctx, request)
 			if err != nil {
 				return tui.CoreRequestFailed(err)
 			}
@@ -1185,7 +1245,8 @@ func (r Runner) Run(ctx context.Context, settings config.Settings) error {
 	}
 	loadRequestHistory := func() tea.Cmd {
 		return func() tea.Msg {
-			history, err := requestreply.NewListHistoryHandler(r.requestHistory).Handle(ctx)
+			historyStore, _ := r.requestRepositories(activeSettings.Profile)
+			history, err := requestreply.NewListHistoryHandler(historyStore).Handle(ctx)
 			if err != nil {
 				return tui.RequestHistoryFailed(err)
 			}
@@ -1194,7 +1255,8 @@ func (r Runner) Run(ctx context.Context, settings config.Settings) error {
 	}
 	loadRequestTemplates := func() tea.Cmd {
 		return func() tea.Msg {
-			templates, err := requestreply.NewListTemplatesHandler(r.requestTemplates).Handle(ctx)
+			_, templateStore := r.requestRepositories(activeSettings.Profile)
+			templates, err := requestreply.NewListTemplatesHandler(templateStore).Handle(ctx)
 			if err != nil {
 				return tui.RequestTemplatesFailed(err)
 			}
@@ -1203,7 +1265,8 @@ func (r Runner) Run(ctx context.Context, settings config.Settings) error {
 	}
 	saveRequestTemplate := func(template domainrequestreply.Template) tea.Cmd {
 		return func() tea.Msg {
-			if err := requestreply.NewSaveTemplateHandler(r.requestTemplates).Handle(ctx, template); err != nil {
+			_, templateStore := r.requestRepositories(activeSettings.Profile)
+			if err := requestreply.NewSaveTemplateHandler(templateStore).Handle(ctx, template); err != nil {
 				return tui.RequestTemplateSaveFailed(err)
 			}
 			return tui.RequestTemplateSaved(template)
@@ -1211,7 +1274,8 @@ func (r Runner) Run(ctx context.Context, settings config.Settings) error {
 	}
 	deleteRequestTemplate := func(name string) tea.Cmd {
 		return func() tea.Msg {
-			if err := requestreply.NewDeleteTemplateHandler(r.requestTemplates).Handle(ctx, name); err != nil {
+			_, templateStore := r.requestRepositories(activeSettings.Profile)
+			if err := requestreply.NewDeleteTemplateHandler(templateStore).Handle(ctx, name); err != nil {
 				return tui.RequestTemplateDeleteFailed(err)
 			}
 			return tui.RequestTemplateDeleted(name)
@@ -1567,6 +1631,40 @@ func (r Runner) Run(ctx context.Context, settings config.Settings) error {
 			return tui.CommandRecorded()
 		}
 	}
+	loadBookmarks := func(available []appbookmarks.TargetView) tea.Cmd {
+		return func() tea.Msg {
+			items, err := r.ListBookmarks(ctx, activeSettings, available)
+			if err != nil {
+				return tui.BookmarksFailed(err)
+			}
+			return tui.BookmarksLoaded(items)
+		}
+	}
+	addBookmark := func(command appbookmarks.AddCommand) tea.Cmd {
+		return func() tea.Msg {
+			item, err := r.AddBookmark(ctx, activeSettings, command)
+			if err != nil {
+				return tui.BookmarksFailed(err)
+			}
+			return tui.BookmarkAdded(item)
+		}
+	}
+	removeBookmark := func(id string) tea.Cmd {
+		return func() tea.Msg {
+			if err := r.DeleteBookmark(ctx, activeSettings, id); err != nil {
+				return tui.BookmarksFailed(err)
+			}
+			return tui.BookmarkRemoved(id)
+		}
+	}
+	saveSearch := func(scope, query string) tea.Cmd {
+		return func() tea.Msg {
+			if err := r.SaveRecentSearch(ctx, activeSettings, scope, query); err != nil {
+				return tui.BookmarksFailed(err)
+			}
+			return tui.RecentSearchSaved()
+		}
+	}
 
 	model := tui.NewModel(settings.Profile, settings.Server, connect, loadMessages).
 		WithMessageWatch(startWatch, stopWatch).
@@ -1606,6 +1704,7 @@ func (r Runner) Run(ctx context.Context, settings config.Settings) error {
 		}
 	}, Ack: ackAlert, AckAll: ackAllAlerts, Scan: scanAlerts})
 	model = model.WithCommandBar(tui.CommandBarServices{Load: loadCommandBar, Record: recordCommand})
+	model = model.WithBookmarks(tui.BookmarkServices{Load: loadBookmarks, Add: addBookmark, Remove: removeBookmark, SaveSearch: saveSearch})
 	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithContext(ctx))
 	if _, err := program.Run(); err != nil {
 		return fmt.Errorf("run terminal UI: %w", err)

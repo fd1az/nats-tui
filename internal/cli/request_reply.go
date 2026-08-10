@@ -150,12 +150,12 @@ func writeExchange(cmd *cobra.Command, exchange domain.Exchange) error {
 	return encoder.Encode(result)
 }
 
-func newRequestHistoryCommand(_ *viper.Viper, services requestServices) *cobra.Command {
+func newRequestHistoryCommand(values *viper.Viper, services requestServices) *cobra.Command {
 	return &cobra.Command{Use: "history", Short: "List saved request history", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		if services.history == nil {
 			return errors.New("request history is not configured")
 		}
-		history, err := services.history.ListRequestHistory(cmd.Context())
+		history, err := services.history.ListRequestHistory(cmd.Context(), config.Load(values))
 		if err != nil {
 			return err
 		}
@@ -184,14 +184,14 @@ func newRequestReplayCommand(values *viper.Viper, services requestServices) *cob
 
 func newRequestTemplateCommand(values *viper.Viper, services requestServices, files FileSystem) *cobra.Command {
 	command := &cobra.Command{Use: "template", Short: "Manage reusable request templates", Args: cobra.NoArgs}
-	command.AddCommand(newSaveRequestTemplateCommand(services, files))
-	command.AddCommand(newListRequestTemplatesCommand(services))
+	command.AddCommand(newSaveRequestTemplateCommand(values, services, files))
+	command.AddCommand(newListRequestTemplatesCommand(values, services))
 	command.AddCommand(newRunRequestTemplateCommand(values, services))
-	command.AddCommand(newDeleteRequestTemplateCommand(services))
+	command.AddCommand(newDeleteRequestTemplateCommand(values, services))
 	return command
 }
 
-func newSaveRequestTemplateCommand(services requestServices, files FileSystem) *cobra.Command {
+func newSaveRequestTemplateCommand(values *viper.Viper, services requestServices, files FileSystem) *cobra.Command {
 	var flags messageFlags
 	command := &cobra.Command{Use: "save NAME SUBJECT [PAYLOAD]", Short: "Save or replace a request template", Args: cobra.RangeArgs(2, 3), RunE: func(cmd *cobra.Command, args []string) error {
 		if services.templates == nil {
@@ -205,7 +205,7 @@ func newSaveRequestTemplateCommand(services requestServices, files FileSystem) *
 		if err != nil {
 			return err
 		}
-		if err := services.templates.SaveRequestTemplate(cmd.Context(), template); err != nil {
+		if err := services.templates.SaveRequestTemplate(cmd.Context(), config.Load(values), template); err != nil {
 			return err
 		}
 		_, err = fmt.Fprintf(cmd.OutOrStdout(), "saved request template %s\n", template.Name())
@@ -215,12 +215,12 @@ func newSaveRequestTemplateCommand(services requestServices, files FileSystem) *
 	return command
 }
 
-func newListRequestTemplatesCommand(services requestServices) *cobra.Command {
+func newListRequestTemplatesCommand(values *viper.Viper, services requestServices) *cobra.Command {
 	return &cobra.Command{Use: "list", Short: "List request templates", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		if services.templates == nil {
 			return errors.New("request templates are not configured")
 		}
-		templates, err := services.templates.ListRequestTemplates(cmd.Context())
+		templates, err := services.templates.ListRequestTemplates(cmd.Context(), config.Load(values))
 		if err != nil {
 			return err
 		}
@@ -240,7 +240,7 @@ func newRunRequestTemplateCommand(values *viper.Viper, services requestServices)
 		if services.templates == nil || services.requester == nil {
 			return errors.New("request template execution is not configured")
 		}
-		template, err := services.templates.GetRequestTemplate(cmd.Context(), args[0])
+		template, err := services.templates.GetRequestTemplate(cmd.Context(), config.Load(values), args[0])
 		if err != nil {
 			return err
 		}
@@ -252,7 +252,7 @@ func newRunRequestTemplateCommand(values *viper.Viper, services requestServices)
 	}}
 }
 
-func newDeleteRequestTemplateCommand(services requestServices) *cobra.Command {
+func newDeleteRequestTemplateCommand(values *viper.Viper, services requestServices) *cobra.Command {
 	var yes bool
 	command := &cobra.Command{Use: "delete NAME", Short: "Delete a request template", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		if !yes {
@@ -261,7 +261,7 @@ func newDeleteRequestTemplateCommand(services requestServices) *cobra.Command {
 		if services.templates == nil {
 			return errors.New("request templates are not configured")
 		}
-		if err := services.templates.DeleteRequestTemplate(cmd.Context(), args[0]); err != nil {
+		if err := services.templates.DeleteRequestTemplate(cmd.Context(), config.Load(values), args[0]); err != nil {
 			return err
 		}
 		_, err := fmt.Fprintf(cmd.OutOrStdout(), "deleted request template %s\n", args[0])

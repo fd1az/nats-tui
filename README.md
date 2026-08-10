@@ -290,6 +290,22 @@ Supported custom actions deliberately form a small allowlist:
 `operate.core.request`. Unknown actions remain stored
 and previewable but fail closed when invoked.
 
+Bookmarks are global within the active connection profile. Select a stream,
+consumer, subject, KV bucket/key, or object bucket/object and press `B` to add
+or remove it. Press `b` from any workspace to open the responsive bookmarks
+list; use Enter to jump and `d` to remove an entry. Bookmarks whose resources
+were renamed or deleted remain visible as stale instead of disappearing. Child
+resources are verified when their bucket is opened.
+
+The same profile-scoped collection is scriptable, including explicit retargeting
+after a resource rename and access to recent reactive searches:
+
+    nats-tui bookmarks
+    nats-tui bookmarks add consumer ORDERS PROCESSOR --label order-worker
+    nats-tui bookmarks retarget BOOKMARK_ID ORDERS_V2 PROCESSOR
+    nats-tui bookmarks delete BOOKMARK_ID --yes
+    nats-tui bookmarks searches --scope messages
+
     nats-tui --authority-dir ./private \
       --authority-operator-seed ./operator.seed
 
@@ -338,10 +354,12 @@ The same workflows are scriptable:
     nats-tui request template run payment-lookup
     nats-tui request template delete payment-lookup --yes
 
-History and templates are written atomically with private permissions to
-`$XDG_CONFIG_HOME/nats-tui/request-reply.json` (or the platform config
-directory equivalent). The retained history is bounded to the newest 100
-exchanges.
+History, templates, bookmarks, and recent searches are written atomically with
+private permissions beneath `$XDG_CONFIG_HOME/nats-tui` (or the platform config
+directory equivalent). Files are separated by the sanitized profile name, so
+local state from one NATS environment never appears in another. Request history
+is bounded to the newest 100 exchanges; recent searches are deduplicated and
+bounded per workspace.
 
 Object Store operations are also scriptable. Progress is written to stderr so stdout
 remains safe for pipelines:
