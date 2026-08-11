@@ -43,6 +43,7 @@ func main() {
 		ObjectBucketDeleter:    runner,
 		Streams:                runner,
 		Messages:               runner,
+		Subjects:               runner,
 		Consumers:              runner,
 		CorePublisher:          runner,
 		CoreRequester:          runner,

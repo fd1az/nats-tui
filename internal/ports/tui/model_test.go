@@ -255,6 +255,55 @@ func TestEnterOnSubjectJumpsToLiveMessageWatch(t *testing.T) {
 	}
 }
 
+func TestSubjectObservationMergesLiveSubjectsAndRates(t *testing.T) {
+	t.Parallel()
+	events := make(chan subjects.TrafficSample, 2)
+	start := func() tea.Cmd { return func() tea.Msg { return SubjectObservationStarted(events) } }
+	model := dashboardModel(t, 120, 30).WithSubjectObservation(start, nil)
+	model.streams = []streams.Summary{{Name: "EVENTS", Subjects: []string{"events.>"}}}
+	model.rebuildSubjects()
+
+	selected, startCommand := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'7'}})
+	if startCommand == nil || !selected.(Model).subjectObservationStarting {
+		t.Fatalf("observation did not start: command=%v model=%+v", startCommand != nil, selected.(Model))
+	}
+	startedValue, _ := selected.(Model).Update(SubjectObservationStarted(events))
+	started := startedValue.(Model)
+	events <- subjects.TrafficSample{Subject: "events.payment.created", Bytes: 120, At: time.Now()}
+	close(events)
+	batch := started.waitForSubjectObservationBatch(events)()
+	observedValue, _ := started.Update(batch)
+	observed := observedValue.(Model)
+	if observed.subjectObservationReceived != 1 {
+		t.Fatalf("received=%d", observed.subjectObservationReceived)
+	}
+	view := observed.View()
+	for _, want := range []string{"payment", "created", "msg/s", "LIVE"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("observed explorer missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestSubjectActionsOpenPrefilledPublishAndRequestComposer(t *testing.T) {
+	t.Parallel()
+	model := dashboardModel(t, 100, 28)
+	model.activeWorkspace = 6
+	model.subjects = []subjects.Node{{Subject: "events.payment.created", WatchSubject: "events.payment.created", Observed: true}}
+
+	publishValue, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	publish := publishValue.(Model)
+	if publish.activeWorkspace != 7 || publish.requestReply.requestMode || publish.requestReply.subject.Value() != "events.payment.created" {
+		t.Fatalf("publish workspace=%d request=%v subject=%q", publish.activeWorkspace, publish.requestReply.requestMode, publish.requestReply.subject.Value())
+	}
+
+	requestValue, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'R'}})
+	request := requestValue.(Model)
+	if request.activeWorkspace != 7 || !request.requestReply.requestMode || request.requestReply.subject.Value() != "events.payment.created" {
+		t.Fatalf("request workspace=%d request=%v subject=%q", request.activeWorkspace, request.requestReply.requestMode, request.requestReply.subject.Value())
+	}
+}
+
 func TestStreamsWorkspaceRendersRealCatalogAndMovesSelection(t *testing.T) {
 	t.Parallel()
 

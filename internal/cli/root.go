@@ -13,6 +13,7 @@ import (
 	"github.com/clcsolutions/nats-tui/internal/app/messages"
 	"github.com/clcsolutions/nats-tui/internal/app/objectstore"
 	"github.com/clcsolutions/nats-tui/internal/app/streams"
+	"github.com/clcsolutions/nats-tui/internal/app/subjects"
 	"github.com/clcsolutions/nats-tui/internal/config"
 	domainrequestreply "github.com/clcsolutions/nats-tui/internal/domain/requestreply"
 	"github.com/spf13/cobra"
@@ -116,6 +117,10 @@ type MessageManager interface {
 	ExportStoredMessages(context.Context, config.Settings, messages.ExportRequest) (messages.ExportResult, error)
 }
 
+type SubjectExplorer interface {
+	ExploreSubjects(context.Context, config.Settings) ([]subjects.Node, error)
+}
+
 type CoreRequester interface {
 	SendCoreRequest(context.Context, config.Settings, domainrequestreply.Request) (domainrequestreply.Exchange, error)
 }
@@ -179,6 +184,7 @@ type Dependencies struct {
 	Consumers              ConsumerManager
 	CorePublisher          CorePublisher
 	Messages               MessageManager
+	Subjects               SubjectExplorer
 	CoreRequester          CoreRequester
 	RequestHistory         RequestHistory
 	RequestTemplates       RequestTemplates
@@ -255,6 +261,7 @@ func NewRoot(deps Dependencies) *cobra.Command {
 	root.AddCommand(newConsumerCommand(values, deps.Consumers))
 	root.AddCommand(newPublishCommand(values, deps.CorePublisher, files))
 	root.AddCommand(newMessageCommand(values, deps.Messages, deps.Streams, deps.CorePublisher))
+	root.AddCommand(newSubjectCommand(values, deps.Subjects, deps.CorePublisher, deps.CoreRequester, files))
 	root.AddCommand(newRequestCommand(values, requestServices{requester: deps.CoreRequester, history: deps.RequestHistory, templates: deps.RequestTemplates}, files))
 	root.AddCommand(newTopologyCommand(values, deps.TopologyReader, deps.TopologyOperator))
 	root.AddCommand(newConnectionsCommand(values, deps.ConnectionReader, deps.ConnectionCloser))

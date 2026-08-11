@@ -136,11 +136,21 @@ These backups are interoperable with the official `nats stream backup` and
 safe for scripts. Existing backup directories are preserved unless `--force`
 is passed; the target stream must not exist during restore.
 
-The Subject Explorer derives a navigable tree from every configured stream
-subject. It supports reactive `/` search across subject patterns and owning
-streams. Select any branch or configured pattern and press Enter or w to jump
-directly into Live Watch; branch nodes subscribe with `prefix.>` while configured
-wildcards are preserved exactly.
+The Subject Explorer merges configured patterns with live application subjects.
+Its rolling ten-second projection shows message/byte rates, hierarchy heat,
+owning streams, attached consumers, and visible managed-user publish/subscribe
+rules. NATS control-plane and request-inbox traffic is excluded from the live
+projection so operational noise does not bury application subjects. Reactive `/`
+search covers subjects and owners. Press Enter or w for Live Watch, p for a
+prefilled publish, or R for request/reply; configured wildcards are preserved for
+watching and converted into a concrete-subject prompt for publishing.
+
+The same static ownership view and contextual operations are scriptable:
+
+    nats-tui subject list --output table
+    nats-tui subject inspect 'events.payment.>'
+    nats-tui subject publish events.payment.created '{"id":42}'
+    nats-tui subject request rpc.lookup '{"id":42}' --timeout 2s
 
 The Key-Value workspace lists real JetStream KV buckets with their value count,
 size, storage medium, replicas, retained history, TTL, and compression state.

@@ -17,6 +17,7 @@ import (
 	appoperator "github.com/clcsolutions/nats-tui/internal/app/operator"
 	apprequestreply "github.com/clcsolutions/nats-tui/internal/app/requestreply"
 	"github.com/clcsolutions/nats-tui/internal/app/streams"
+	appsubjects "github.com/clcsolutions/nats-tui/internal/app/subjects"
 	"github.com/clcsolutions/nats-tui/internal/config"
 	domainrequestreply "github.com/clcsolutions/nats-tui/internal/domain/requestreply"
 	domaintopology "github.com/clcsolutions/nats-tui/internal/domain/topology"
@@ -49,6 +50,7 @@ type systemClock struct{}
 func (systemClock) Now() time.Time { return time.Now() }
 
 const effectivelyIndefinitePause = 100 * 365 * 24 * time.Hour
+const natsFlushTimeout = 5 * time.Second
 
 func (m *Monitor) now() time.Time {
 	if m.clock == nil {
@@ -62,7 +64,9 @@ func (m *Monitor) Publish(ctx context.Context, message domainrequestreply.Messag
 	if err := m.connection.PublishMsg(outbound); err != nil {
 		return fmt.Errorf("publish Core NATS message: %w", err)
 	}
-	if err := m.connection.FlushWithContext(ctx); err != nil {
+	activationCtx, cancel := context.WithTimeout(ctx, natsFlushTimeout)
+	defer cancel()
+	if err := m.connection.FlushWithContext(activationCtx); err != nil {
 		return fmt.Errorf("flush Core NATS publish: %w", err)
 	}
 	return nil
@@ -84,7 +88,9 @@ func (m *Monitor) Request(ctx context.Context, request domainrequestreply.Reques
 	if err := m.connection.PublishMsg(outbound); err != nil {
 		return nil, fmt.Errorf("publish Core NATS request: %w", err)
 	}
-	if err := m.connection.FlushWithContext(ctx); err != nil {
+	activationCtx, cancel := context.WithTimeout(ctx, natsFlushTimeout)
+	defer cancel()
+	if err := m.connection.FlushWithContext(activationCtx); err != nil {
 		return nil, fmt.Errorf("flush Core NATS request: %w", err)
 	}
 	replies := make([]domainrequestreply.Reply, 0, request.MaxReplies())
@@ -1494,13 +1500,51 @@ func (m *Monitor) Watch(ctx context.Context, subjects []string) (<-chan messages
 		}
 		subscriptions = append(subscriptions, subscription)
 	}
-	if err := m.connection.FlushWithContext(ctx); err != nil {
+	activationCtx, cancel := context.WithTimeout(ctx, natsFlushTimeout)
+	defer cancel()
+	if err := m.connection.FlushWithContext(activationCtx); err != nil {
 		unsubscribeAll(subscriptions)
 		return nil, fmt.Errorf("activate message watch: %w", err)
 	}
 
 	events := make(chan messages.Record, 512)
 	go forwardMessages(ctx, incoming, events, subscriptions, m.now)
+	return events, nil
+}
+
+func (m *Monitor) ObserveSubjects(ctx context.Context) (<-chan appsubjects.TrafficSample, error) {
+	incoming := make(chan *nats.Msg, 1024)
+	subscription, err := m.connection.ChanSubscribe(">", incoming)
+	if err != nil {
+		return nil, fmt.Errorf("observe account subjects: %w", err)
+	}
+	activationCtx, cancel := context.WithTimeout(ctx, natsFlushTimeout)
+	defer cancel()
+	if err := m.connection.FlushWithContext(activationCtx); err != nil {
+		_ = subscription.Unsubscribe()
+		return nil, fmt.Errorf("activate subject observation: %w", err)
+	}
+	events := make(chan appsubjects.TrafficSample, 512)
+	go func() {
+		defer close(events)
+		defer func() { _ = subscription.Unsubscribe() }()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case message := <-incoming:
+				if message == nil {
+					continue
+				}
+				sample := appsubjects.TrafficSample{Subject: message.Subject, Bytes: uint64(len(message.Data)), At: m.now()}
+				select {
+				case events <- sample:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+	}()
 	return events, nil
 }
 

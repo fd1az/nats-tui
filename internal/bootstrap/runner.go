@@ -29,6 +29,7 @@ import (
 	"github.com/clcsolutions/nats-tui/internal/app/operator"
 	"github.com/clcsolutions/nats-tui/internal/app/requestreply"
 	"github.com/clcsolutions/nats-tui/internal/app/streams"
+	"github.com/clcsolutions/nats-tui/internal/app/subjects"
 	"github.com/clcsolutions/nats-tui/internal/app/topology"
 	"github.com/clcsolutions/nats-tui/internal/config"
 	domainauthority "github.com/clcsolutions/nats-tui/internal/domain/authority"
@@ -82,6 +83,7 @@ type Session interface {
 	messages.Browser
 	messages.Watcher
 	messages.OrderedWatcher
+	subjects.Observer
 	kvstore.BucketCatalog
 	kvstore.BucketCreator
 	kvstore.BucketUpdater
@@ -842,6 +844,8 @@ func (r Runner) Run(ctx context.Context, settings config.Settings) error {
 	sessions := &sessionStore{objectFiles: r.objectTransfer(), streamArchive: r.streamArchive()}
 	defer sessions.Close()
 	var alertCancel context.CancelFunc
+	var subjectObservationMu sync.Mutex
+	var subjectObservationCancel context.CancelFunc
 	activeSettings := settings
 	defer func() {
 		if alertCancel != nil {
@@ -902,6 +906,35 @@ func (r Runner) Run(ctx context.Context, settings config.Settings) error {
 				return tui.MessagesFailed(err)
 			}
 			return tui.MessagesLoaded(query.Stream, records)
+		}
+	}
+	startSubjectObservation := func() tea.Cmd {
+		return func() tea.Msg {
+			monitor := sessions.Current()
+			if monitor == nil {
+				return tui.SubjectObservationFailed(fmt.Errorf("no active NATS connection"))
+			}
+			observationCtx, cancel := context.WithCancel(ctx)
+			events, err := subjects.NewObserveHandler(monitor).Handle(observationCtx)
+			if err != nil {
+				cancel()
+				return tui.SubjectObservationFailed(err)
+			}
+			subjectObservationMu.Lock()
+			if subjectObservationCancel != nil {
+				subjectObservationCancel()
+			}
+			subjectObservationCancel = cancel
+			subjectObservationMu.Unlock()
+			return tui.SubjectObservationStarted(events)
+		}
+	}
+	stopSubjectObservation := func() {
+		subjectObservationMu.Lock()
+		defer subjectObservationMu.Unlock()
+		if subjectObservationCancel != nil {
+			subjectObservationCancel()
+			subjectObservationCancel = nil
 		}
 	}
 	exportMessages := func(request messages.ExportRequest) tea.Cmd {
@@ -1797,6 +1830,7 @@ func (r Runner) Run(ctx context.Context, settings config.Settings) error {
 		WithOrderedMessageWatch(startOrderedWatch).
 		WithMessageHistory(loadMessageHistory).
 		WithMessageOperations(exportMessages, deleteMessage).
+		WithSubjectObservation(startSubjectObservation, stopSubjectObservation).
 		WithRefresh(refresh).
 		WithConsumerActions(consumerAction).
 		WithConsumerConfiguration(consumerConfigure).

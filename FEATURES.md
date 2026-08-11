@@ -143,20 +143,20 @@ application and adapter boundaries.
 - [x] Dropped-message and subscription-pressure telemetry.
 - [x] Freeze a live snapshot for offline inspection.
 
-## Subject Explorer — Partial
+## Subject Explorer — Complete
 
 - [x] Build a navigable tree from configured stream subjects.
 - [x] Preserve configured wildcard patterns.
 - [x] Search by subject or owning stream.
 - [x] Responsive list and detail pane.
 - [x] Jump from any branch or pattern directly into Live Watch.
-- [ ] Merge observed live subjects into the configured tree.
-- [ ] Per-subject message and byte rates.
-- [ ] Show streams and consumers attached to a subject.
-- [ ] Show publish/subscribe permissions affecting a subject.
-- [ ] Publish directly to the selected subject.
-- [ ] Request/reply directly from the selected subject.
-- [ ] Subject hierarchy traffic heat indicators.
+- [x] Merge observed live subjects into the configured tree.
+- [x] Per-subject message and byte rates.
+- [x] Show streams and consumers attached to a subject.
+- [x] Show publish/subscribe permissions affecting a subject.
+- [x] Publish directly to the selected subject.
+- [x] Request/reply directly from the selected subject.
+- [x] Subject hierarchy traffic heat indicators.
 
 ## Key-Value Store Management
 

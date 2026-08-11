@@ -57,6 +57,7 @@ type LoadMessagesFunc func(string) tea.Cmd
 type LoadMessageHistoryFunc func(messages.HistoryQuery) tea.Cmd
 type ExportMessagesFunc func(messages.ExportRequest) tea.Cmd
 type DeleteMessageFunc func(streams.MessageDeleteCommand) tea.Cmd
+type StartSubjectObservationFunc func() tea.Cmd
 type StartWatchFunc func(string, []string) tea.Cmd
 type StartOrderedWatchFunc func(string, []string) tea.Cmd
 type StopWatchFunc func()
@@ -182,6 +183,8 @@ type Model struct {
 	loadMessageHistory           LoadMessageHistoryFunc
 	exportMessages               ExportMessagesFunc
 	deleteMessage                DeleteMessageFunc
+	startSubjectObservation      StartSubjectObservationFunc
+	stopSubjectObservation       StopWatchFunc
 	startWatch                   StartWatchFunc
 	startOrderedWatch            StartOrderedWatchFunc
 	stopWatch                    StopWatchFunc
@@ -389,6 +392,12 @@ type Model struct {
 	subjectCursor                int
 	subjectSearchQuery           string
 	subjectSearchMode            bool
+	subjectTraffic               *subjects.TrafficTracker
+	subjectObserving             bool
+	subjectObservationStarting   bool
+	subjectObservationEvents     <-chan subjects.TrafficSample
+	subjectObservationReceived   uint64
+	subjectObservationErr        error
 	theme                        theme
 	runtime                      Runtime
 }
@@ -599,6 +608,7 @@ func NewModel(profile, server string, connect ConnectFunc, loaders ...LoadMessag
 		requestReply:          newRequestReplyState(colors),
 		consumerHistory:       make(map[consumerID][]consumerMetricSample),
 		messageInspectionMode: messages.InspectAuto,
+		subjectTraffic:        subjects.NewTrafficTracker(subjects.DefaultTrafficWindow),
 	}
 	if len(loaders) > 0 {
 		model.loadMessages = loaders[0]
@@ -628,6 +638,11 @@ func (m Model) WithMessageHistory(load LoadMessageHistoryFunc) Model {
 func (m Model) WithMessageOperations(export ExportMessagesFunc, deleteMessage DeleteMessageFunc) Model {
 	m.exportMessages = export
 	m.deleteMessage = deleteMessage
+	return m
+}
+
+func (m Model) WithSubjectObservation(start StartSubjectObservationFunc, stop StopWatchFunc) Model {
+	m.startSubjectObservation, m.stopSubjectObservation = start, stop
 	return m
 }
 
@@ -977,9 +992,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.snapshot = msg.snapshot
 		m.streams = append([]streams.Summary(nil), msg.streams...)
 		m.streamCursor = 0
-		m.rebuildSubjects()
 		m.consumers = append([]consumers.Summary(nil), msg.consumers...)
 		m.consumerCursor = 0
+		m.rebuildSubjects()
 		m.keyValueBuckets = append([]kvstore.BucketSummary(nil), msg.buckets...)
 		m.keyValueCursor = 0
 		m.objectBuckets = append([]objectstore.BucketSummary(nil), msg.objects...)
@@ -1002,6 +1017,13 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.objectWatchEvents = nil
 		m.objectWatchReceived = 0
 		m.objectWatchErr = nil
+		if m.stopSubjectObservation != nil && (m.subjectObserving || m.subjectObservationStarting) {
+			m.stopSubjectObservation()
+		}
+		m.subjectTraffic = subjects.NewTrafficTracker(subjects.DefaultTrafficWindow)
+		m.subjectObserving, m.subjectObservationStarting = false, false
+		m.subjectObservationEvents, m.subjectObservationErr = nil, nil
+		m.subjectObservationReceived = 0
 		m.refreshGeneration++
 		m.refreshing = false
 		m.refreshErr = nil
@@ -1108,6 +1130,39 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.watchPaused = false
 		m.watchEvents = nil
 		return m, nil
+	case subjectObservationStartedMsg:
+		m.subjectObservationStarting = false
+		m.subjectObserving = true
+		m.subjectObservationEvents = msg.events
+		m.subjectObservationErr = nil
+		return m, tea.Batch(m.waitForSubjectObservationBatch(msg.events), m.scheduleSubjectTrafficTick())
+	case subjectObservationFailedMsg:
+		m.subjectObservationStarting = false
+		m.subjectObserving = false
+		m.subjectObservationErr = msg.err
+		return m, nil
+	case subjectObservationBatchMsg:
+		if m.subjectTraffic == nil {
+			m.subjectTraffic = subjects.NewTrafficTracker(subjects.DefaultTrafficWindow)
+		}
+		m.subjectObservationReceived += uint64(m.subjectTraffic.Observe(msg.samples...))
+		selected := selectedSubjectName(m.displayedSubjects(), m.subjectCursor)
+		m.rebuildSubjects()
+		m.subjectCursor = findSubject(m.displayedSubjects(), selected)
+		return m, m.waitForSubjectObservationBatch(m.subjectObservationEvents)
+	case subjectObservationEndedMsg:
+		m.subjectObservationStarting = false
+		m.subjectObserving = false
+		m.subjectObservationEvents = nil
+		return m, nil
+	case subjectTrafficTickMsg:
+		if !m.subjectObserving {
+			return m, nil
+		}
+		selected := selectedSubjectName(m.displayedSubjects(), m.subjectCursor)
+		m.rebuildSubjects()
+		m.subjectCursor = findSubject(m.displayedSubjects(), selected)
+		return m, m.scheduleSubjectTrafficTick()
 	case refreshTickMsg:
 		if msg.generation != m.refreshGeneration || m.screen != screenWorkspace {
 			return m, nil
@@ -1744,6 +1799,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.operator.err = nil
 		m.operator.catalog = msg.catalog
 		m.operator.cursor = min(m.operator.cursor, max(len(msg.catalog.Accounts())-1, 0))
+		m.rebuildSubjects()
 		return m, nil
 	case operatorFailedMsg:
 		m.operator.loading = false
@@ -2278,6 +2334,9 @@ func (m Model) updateWorkspace(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.objectBucketOperationErr = nil
 		}
 	case "p":
+		if m.activeWorkspace == 6 {
+			return m.composeFromSelectedSubject(false)
+		}
 		if m.canOperateConsumer() {
 			action := consumers.ActionPause
 			if m.consumers[m.consumerCursor].Status == consumers.StatusPaused {
@@ -2349,6 +2408,9 @@ func (m Model) updateWorkspace(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	case "R":
+		if m.activeWorkspace == 6 {
+			return m.composeFromSelectedSubject(true)
+		}
 		if m.activeWorkspace == 3 && len(m.displayedMessages()) > 0 && !m.messageOperationRunning {
 			form := newMessageRepublishForm(m.displayedMessages()[m.messageCursor])
 			m.messageRepublishForm = &form
@@ -2474,6 +2536,9 @@ func (m Model) updateWorkspace(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case "right", "l", "tab":
 		m.activeWorkspace = (m.activeWorkspace + 1) % len(workspaces)
+		if m.activeWorkspace == 6 {
+			return m.ensureSubjectObservation()
+		}
 		if m.activeWorkspace == 8 && len(m.topology.snapshot.Servers()) == 0 {
 			return m.startTopologyLoad()
 		}
@@ -2488,6 +2553,9 @@ func (m Model) updateWorkspace(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case "left", "h", "shift+tab":
 		m.activeWorkspace = (m.activeWorkspace - 1 + len(workspaces)) % len(workspaces)
+		if m.activeWorkspace == 6 {
+			return m.ensureSubjectObservation()
+		}
 		if m.activeWorkspace == 8 && len(m.topology.snapshot.Servers()) == 0 {
 			return m.startTopologyLoad()
 		}
@@ -2756,6 +2824,9 @@ func (m Model) updateWorkspace(message tea.Msg) (tea.Model, tea.Cmd) {
 	default:
 		before := m.activeWorkspace
 		m.selectWorkspace(key.String())
+		if before != m.activeWorkspace && m.activeWorkspace == 6 {
+			return m.ensureSubjectObservation()
+		}
 		if before != m.activeWorkspace && m.activeWorkspace == 8 && len(m.topology.snapshot.Servers()) == 0 {
 			return m.startTopologyLoad()
 		}
@@ -2879,6 +2950,11 @@ func (m Model) showConnection() (tea.Model, tea.Cmd) {
 	}
 	m.watching = false
 	m.watchStarting = false
+	if m.stopSubjectObservation != nil && (m.subjectObserving || m.subjectObservationStarting) {
+		m.stopSubjectObservation()
+	}
+	m.subjectObserving, m.subjectObservationStarting = false, false
+	m.subjectObservationEvents = nil
 	if m.stopKeyValueWatch != nil {
 		m.stopKeyValueWatch()
 	}
