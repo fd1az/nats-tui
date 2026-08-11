@@ -940,6 +940,65 @@ func TestSpacePausesLiveWatchWithoutStoppingIt(t *testing.T) {
 	}
 }
 
+func TestMessageExportUsesImmutableVisibleSnapshot(t *testing.T) {
+	t.Parallel()
+	var request messages.ExportRequest
+	export := func(input messages.ExportRequest) tea.Cmd {
+		request = input
+		return func() tea.Msg {
+			return MessageExportSucceeded(messages.ExportResult{Path: input.Path, Format: string(input.Format), Messages: len(input.Records)})
+		}
+	}
+	model := dashboardModel(t, 120, 28).WithMessageOperations(export, nil)
+	model.activeWorkspace = 3
+	model.messageStream = "EVENTS"
+	model.setMessages([]messages.Record{{Sequence: 1, Subject: "events.one"}, {Sequence: 2, Subject: "events.two"}})
+
+	opened, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'E'}})
+	form := opened.(Model)
+	if form.messageExportForm == nil || !strings.Contains(form.View(), "WHAT TO PUT HERE") {
+		t.Fatalf("export form not rendered:\n%s", form.View())
+	}
+	submitted, command := form.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	if command == nil || !submitted.(Model).messageOperationRunning || len(request.Records) != 2 || request.Format != messages.ExportJSONL {
+		t.Fatalf("running=%v request=%+v", submitted.(Model).messageOperationRunning, request)
+	}
+}
+
+func TestFreezeStopsSubscriptionAndKeepsSnapshot(t *testing.T) {
+	t.Parallel()
+	stopped := false
+	model := dashboardModel(t, 100, 24).WithMessageWatch(nil, func() { stopped = true })
+	model.activeWorkspace = 3
+	model.watching = true
+	model.liveReceived = 12
+	model.setMessages([]messages.Record{{Subject: "events.kept"}})
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	frozen := updated.(Model)
+	if !stopped || frozen.watching || !frozen.watchFrozen || len(frozen.messages) != 1 || !strings.Contains(frozen.watchStatusView(), "FROZEN") {
+		t.Fatalf("stopped=%v watching=%v frozen=%v messages=%d status=%q", stopped, frozen.watching, frozen.watchFrozen, len(frozen.messages), frozen.watchStatusView())
+	}
+}
+
+func TestLiveTelemetryReportsBufferDropsAndSubscriptionPressure(t *testing.T) {
+	t.Parallel()
+	model := dashboardModel(t, 120, 26)
+	model.activeWorkspace = 3
+	model.watching = true
+	existing := make([]messages.Record, messageBufferLimit)
+	model.setMessages(existing)
+	updated, _ := model.Update(watchBatchMsg{records: []messages.Record{{Subject: "events.new", WatchPending: 8, WatchCapacity: 32}}})
+	observed := updated.(Model)
+	if observed.liveDropped != 1 || observed.watchPressure != 8 || observed.watchCapacity != 32 {
+		t.Fatalf("dropped=%d pressure=%d capacity=%d", observed.liveDropped, observed.watchPressure, observed.watchCapacity)
+	}
+	status := observed.watchStatusView()
+	if !strings.Contains(status, "queue 8/32") || !strings.Contains(status, "1 not retained") {
+		t.Fatalf("status=%q", status)
+	}
+}
+
 func TestConsumerWorkspaceRendersLagAndMovesSelection(t *testing.T) {
 	t.Parallel()
 

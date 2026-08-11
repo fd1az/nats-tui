@@ -1406,6 +1406,11 @@ func consumerReplayPolicyFromNATS(policy jetstream.ReplayPolicy) consumers.Repla
 }
 
 func (m *Monitor) RecentMessages(ctx context.Context, streamName string, limit int) ([]messages.Record, error) {
+	return m.BrowseMessages(ctx, messages.HistoryQuery{Stream: streamName, Limit: limit})
+}
+
+func (m *Monitor) BrowseMessages(ctx context.Context, query messages.HistoryQuery) ([]messages.Record, error) {
+	streamName, limit := query.Stream, query.Limit
 	stream, err := m.jetstream.Stream(ctx, streamName)
 	if err != nil {
 		return nil, fmt.Errorf("open stream %q: %w", streamName, err)
@@ -1419,7 +1424,14 @@ func (m *Monitor) RecentMessages(ctx context.Context, streamName string, limit i
 	}
 
 	result := make([]messages.Record, 0, min(limit, int(info.State.Msgs)))
-	for sequence := info.State.LastSeq; sequence >= info.State.FirstSeq && len(result) < limit; sequence-- {
+	lastSequence := info.State.LastSeq
+	if query.EndSequence > 0 {
+		lastSequence = min(lastSequence, query.EndSequence)
+	}
+	for sequence := lastSequence; sequence >= info.State.FirstSeq && len(result) < limit; sequence-- {
+		if query.StartSequence > 0 && sequence < query.StartSequence {
+			break
+		}
 		message, getErr := stream.GetMsg(ctx, sequence)
 		if errors.Is(getErr, jetstream.ErrMsgNotFound) {
 			if sequence == 0 {
@@ -1430,18 +1442,41 @@ func (m *Monitor) RecentMessages(ctx context.Context, streamName string, limit i
 		if getErr != nil {
 			return nil, fmt.Errorf("load message %d from %q: %w", sequence, streamName, getErr)
 		}
+		if query.StartTime != nil && message.Time.Before(*query.StartTime) {
+			break
+		}
+		if query.Subject != "" && !matchesSubject(query.Subject, message.Subject) {
+			if sequence == 0 {
+				break
+			}
+			continue
+		}
 		result = append(result, messages.Record{
 			Sequence: message.Sequence,
 			Subject:  message.Subject,
 			Time:     message.Time,
 			Headers:  map[string][]string(message.Header),
 			Payload:  append([]byte(nil), message.Data...),
+			Stream:   streamName,
 		})
 		if sequence == 0 {
 			break
 		}
 	}
 	return result, nil
+}
+
+func matchesSubject(pattern, subject string) bool {
+	patternTokens, subjectTokens := strings.Split(pattern, "."), strings.Split(subject, ".")
+	for index, token := range patternTokens {
+		if token == ">" {
+			return index < len(subjectTokens)
+		}
+		if index >= len(subjectTokens) || (token != "*" && token != subjectTokens[index]) {
+			return false
+		}
+	}
+	return len(patternTokens) == len(subjectTokens)
 }
 
 func (m *Monitor) Watch(ctx context.Context, subjects []string) (<-chan messages.Record, error) {
@@ -1488,7 +1523,11 @@ func (m *Monitor) WatchOrdered(ctx context.Context, streamName string, subjects 
 		if metadataErr != nil {
 			return
 		}
-		record := messages.Record{Sequence: metadata.Sequence.Stream, Subject: message.Subject(), Time: metadata.Timestamp, Headers: cloneHeader(message.Headers()), Payload: append([]byte(nil), message.Data()...)}
+		record := messages.Record{
+			Sequence: metadata.Sequence.Stream, ConsumerSequence: metadata.Sequence.Consumer,
+			Subject: message.Subject(), Time: metadata.Timestamp, Headers: cloneHeader(message.Headers()), Payload: append([]byte(nil), message.Data()...),
+			Stream: metadata.Stream, Consumer: metadata.Consumer, Domain: metadata.Domain, Deliveries: metadata.NumDelivered, Pending: metadata.NumPending,
+		}
 		select {
 		case events <- record:
 		case <-ctx.Done():
@@ -1521,10 +1560,12 @@ func forwardMessages(ctx context.Context, incoming <-chan *nats.Msg, events chan
 				continue
 			}
 			record := messages.Record{
-				Subject: message.Subject,
-				Time:    now(),
-				Headers: cloneHeader(message.Header),
-				Payload: append([]byte(nil), message.Data...),
+				Subject:       message.Subject,
+				Time:          now(),
+				Headers:       cloneHeader(message.Header),
+				Payload:       append([]byte(nil), message.Data...),
+				WatchPending:  len(incoming),
+				WatchCapacity: cap(incoming),
 			}
 			select {
 			case events <- record:

@@ -42,6 +42,7 @@ import (
 type Runner struct {
 	objectFiles        *localfiles.ObjectTransfer
 	streamArchives     *localfiles.StreamArchive
+	messageFiles       *localfiles.MessageFileWriter
 	connect            Connector
 	copyValue          tui.CopyValueFunc
 	timeout            TimeoutFactory
@@ -78,6 +79,7 @@ type Session interface {
 	connections.Source
 	connections.Operator
 	messages.Reader
+	messages.Browser
 	messages.Watcher
 	messages.OrderedWatcher
 	kvstore.BucketCatalog
@@ -118,8 +120,9 @@ type TimeoutFactory func(context.Context, time.Duration) (context.Context, conte
 func NewRunner() Runner {
 	files := localfiles.NewOSObjectTransfer()
 	archives := localfiles.NewOSStreamArchive()
+	messageFiles := localfiles.NewOSMessageFileWriter()
 	return Runner{
-		objectFiles: &files, streamArchives: &archives, connect: func(settings config.Settings) (Session, error) { return natsmonitor.Connect(settings) },
+		objectFiles: &files, streamArchives: &archives, messageFiles: &messageFiles, connect: func(settings config.Settings) (Session, error) { return natsmonitor.Connect(settings) },
 		copyValue: clipboard.WriteAll, timeout: context.WithTimeout,
 		requestStateMu: &sync.Mutex{}, requestStates: make(map[string]*localstate.RequestRepository),
 		bookmarkStateMu: &sync.Mutex{}, bookmarkStates: make(map[string]*localstate.BookmarkRepository),
@@ -884,6 +887,55 @@ func (r Runner) Run(ctx context.Context, settings config.Settings) error {
 				return tui.MessagesFailed(err)
 			}
 			return tui.MessagesLoaded(stream, records)
+		}
+	}
+	loadMessageHistory := func(query messages.HistoryQuery) tea.Cmd {
+		return func() tea.Msg {
+			monitor := sessions.Current()
+			if monitor == nil {
+				return tui.MessagesFailed(fmt.Errorf("no active NATS connection"))
+			}
+			queryCtx, cancel := r.withTimeout(ctx, 15*time.Second)
+			defer cancel()
+			records, err := messages.NewBrowseHandler(monitor).Handle(queryCtx, query)
+			if err != nil {
+				return tui.MessagesFailed(err)
+			}
+			return tui.MessagesLoaded(query.Stream, records)
+		}
+	}
+	exportMessages := func(request messages.ExportRequest) tea.Cmd {
+		return func() tea.Msg {
+			monitor := sessions.Current()
+			if monitor == nil {
+				return tui.MessageExportFailed(fmt.Errorf("no active NATS connection"))
+			}
+			writer := r.messageFiles
+			if writer == nil {
+				value := localfiles.NewOSMessageFileWriter()
+				writer = &value
+			}
+			exportCtx, cancel := r.withTimeout(ctx, 30*time.Second)
+			defer cancel()
+			result, err := messages.NewExportHandler(monitor, writer).Handle(exportCtx, request)
+			if err != nil {
+				return tui.MessageExportFailed(err)
+			}
+			return tui.MessageExportSucceeded(result)
+		}
+	}
+	deleteMessage := func(command streams.MessageDeleteCommand) tea.Cmd {
+		return func() tea.Msg {
+			monitor := sessions.Current()
+			if monitor == nil {
+				return tui.MessageDeleteFailed(fmt.Errorf("no active NATS connection"))
+			}
+			actionCtx, cancel := r.withTimeout(ctx, streamActionTimeout)
+			defer cancel()
+			if err := streams.NewMaintenanceHandler(monitor).DeleteMessage(actionCtx, command); err != nil {
+				return tui.MessageDeleteFailed(err)
+			}
+			return tui.MessageDeleteSucceeded(command.Sequence)
 		}
 	}
 	loadKeyValueKeys := func(bucket string) tea.Cmd {
@@ -1743,6 +1795,8 @@ func (r Runner) Run(ctx context.Context, settings config.Settings) error {
 	model := tui.NewModel(settings.Profile, settings.Server, connect, loadMessages).
 		WithMessageWatch(startWatch, stopWatch).
 		WithOrderedMessageWatch(startOrderedWatch).
+		WithMessageHistory(loadMessageHistory).
+		WithMessageOperations(exportMessages, deleteMessage).
 		WithRefresh(refresh).
 		WithConsumerActions(consumerAction).
 		WithConsumerConfiguration(consumerConfigure).

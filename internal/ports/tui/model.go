@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -53,6 +54,9 @@ type ConnectionInput struct {
 
 type ConnectFunc func(ConnectionInput) tea.Cmd
 type LoadMessagesFunc func(string) tea.Cmd
+type LoadMessageHistoryFunc func(messages.HistoryQuery) tea.Cmd
+type ExportMessagesFunc func(messages.ExportRequest) tea.Cmd
+type DeleteMessageFunc func(streams.MessageDeleteCommand) tea.Cmd
 type StartWatchFunc func(string, []string) tea.Cmd
 type StartOrderedWatchFunc func(string, []string) tea.Cmd
 type StopWatchFunc func()
@@ -175,6 +179,9 @@ type Model struct {
 	snapshot                     dashboard.Snapshot
 	connect                      ConnectFunc
 	loadMessages                 LoadMessagesFunc
+	loadMessageHistory           LoadMessageHistoryFunc
+	exportMessages               ExportMessagesFunc
+	deleteMessage                DeleteMessageFunc
 	startWatch                   StartWatchFunc
 	startOrderedWatch            StartOrderedWatchFunc
 	stopWatch                    StopWatchFunc
@@ -363,8 +370,20 @@ type Model struct {
 	messageCursor                int
 	loadingMessages              bool
 	messageErr                   error
+	messageNotice                string
 	showMessageDetail            bool
 	messageDetailOffset          int
+	messageInspectionMode        messages.InspectionMode
+	messageHistoryForm           *messageHistoryForm
+	messageHistoryQuery          messages.HistoryQuery
+	messageExportForm            *messageExportForm
+	messageRepublishForm         *messageRepublishForm
+	confirmMessageDelete         bool
+	messageOperationRunning      bool
+	watchFrozen                  bool
+	liveDropped                  uint64
+	watchPressure                int
+	watchCapacity                int
 	subjects                     []subjects.Node
 	filteredSubjects             []subjects.Node
 	subjectCursor                int
@@ -570,15 +589,16 @@ func NewModel(profile, server string, connect ConnectFunc, loaders ...LoadMessag
 	loader.Style = lipgloss.NewStyle().Foreground(colors.accent)
 
 	model := Model{
-		profile:         profile,
-		connect:         connect,
-		serverInput:     serverInput,
-		spinner:         loader,
-		screen:          screenWelcome,
-		theme:           colors,
-		runtime:         systemRuntime{},
-		requestReply:    newRequestReplyState(colors),
-		consumerHistory: make(map[consumerID][]consumerMetricSample),
+		profile:               profile,
+		connect:               connect,
+		serverInput:           serverInput,
+		spinner:               loader,
+		screen:                screenWelcome,
+		theme:                 colors,
+		runtime:               systemRuntime{},
+		requestReply:          newRequestReplyState(colors),
+		consumerHistory:       make(map[consumerID][]consumerMetricSample),
+		messageInspectionMode: messages.InspectAuto,
 	}
 	if len(loaders) > 0 {
 		model.loadMessages = loaders[0]
@@ -597,6 +617,17 @@ func (m Model) WithRuntime(runtime Runtime) Model {
 func (m Model) WithMessageWatch(start StartWatchFunc, stop StopWatchFunc) Model {
 	m.startWatch = start
 	m.stopWatch = stop
+	return m
+}
+
+func (m Model) WithMessageHistory(load LoadMessageHistoryFunc) Model {
+	m.loadMessageHistory = load
+	return m
+}
+
+func (m Model) WithMessageOperations(export ExportMessagesFunc, deleteMessage DeleteMessageFunc) Model {
+	m.exportMessages = export
+	m.deleteMessage = deleteMessage
 	return m
 }
 
@@ -1003,12 +1034,16 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.watchStarting = false
 		m.watchPaused = false
 		m.liveReceived = 0
+		m.liveDropped = 0
+		m.watchFrozen = false
+		m.watchPressure, m.watchCapacity = 0, 0
 		m.setMessages(msg.records)
 		m.messageStream = msg.stream
 		m.watchSubjects = m.subjectsForStream(msg.stream)
 		m.messageCursor = 0
 		m.messageErr = nil
 		m.loadingMessages = false
+		m.messageHistoryForm = nil
 		m.activeWorkspace = 3
 		return m, nil
 	case messagesFailedMsg:
@@ -1016,11 +1051,39 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.loadingMessages = false
 		m.activeWorkspace = 3
 		return m, nil
+	case messageExportSucceededMsg:
+		m.messageOperationRunning = false
+		m.messageExportForm = nil
+		m.messageErr = nil
+		m.messageNotice = fmt.Sprintf("Exported %d messages (%s) to %s", msg.result.Messages, msg.result.Format, msg.result.Path)
+		return m, nil
+	case messageExportFailedMsg:
+		m.messageOperationRunning = false
+		m.messageErr = msg.err
+		return m, nil
+	case messageDeleteSucceededMsg:
+		m.messageOperationRunning = false
+		m.messageErr = nil
+		m.messageNotice = fmt.Sprintf("Deleted stored message #%d", msg.sequence)
+		remaining := m.messages[:0]
+		for _, record := range m.messages {
+			if record.Sequence != msg.sequence {
+				remaining = append(remaining, record)
+			}
+		}
+		m.setMessages(remaining)
+		m.messageCursor = min(m.messageCursor, max(len(m.displayedMessages())-1, 0))
+		return m, nil
+	case messageDeleteFailedMsg:
+		m.messageOperationRunning = false
+		m.messageErr = msg.err
+		return m, nil
 	case watchStartedMsg:
 		m.watchStarting = false
 		m.watching = true
 		m.watchPaused = false
 		m.watchEvents = msg.events
+		m.watchFrozen = false
 		return m, m.waitForWatchBatch(msg.events)
 	case watchFailedMsg:
 		m.watchStarting = false
@@ -1029,7 +1092,12 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case watchBatchMsg:
 		m.liveReceived += uint64(len(msg.records))
+		for _, record := range msg.records {
+			m.watchPressure = max(m.watchPressure, record.WatchPending)
+			m.watchCapacity = max(m.watchCapacity, record.WatchCapacity)
+		}
 		if m.watchPaused {
+			m.liveDropped += uint64(len(msg.records))
 			return m, m.waitForWatchBatch(m.watchEvents)
 		}
 		m.prependLiveMessages(msg.records)
@@ -1559,10 +1627,19 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.requestReply.error = nil
 		m.requestReply.notice = fmt.Sprintf("Published %d bytes to %s", len(msg.message.Payload()), msg.message.Subject())
 		m.requestReply.cliEquivalent = publishCLIEquivalent(msg.message)
+		if m.activeWorkspace == 3 && m.messageRepublishForm != nil {
+			m.messageRepublishForm = nil
+			m.messageOperationRunning = false
+			m.messageNotice = fmt.Sprintf("Republished %d bytes to %s", len(msg.message.Payload()), msg.message.Subject())
+		}
 		return m, nil
 	case corePublishFailedMsg:
 		m.requestReply.running = false
 		m.requestReply.error = msg.err
+		if m.activeWorkspace == 3 && m.messageRepublishForm != nil {
+			m.messageOperationRunning = false
+			m.messageErr = msg.err
+		}
 		return m, nil
 	case coreRequestSucceededMsg:
 		m.requestReply.running = false
@@ -1998,6 +2075,15 @@ func (m Model) updateWorkspace(message tea.Msg) (tea.Model, tea.Cmd) {
 	if m.streamForm != nil {
 		return m.updateStreamForm(key)
 	}
+	if m.messageHistoryForm != nil {
+		return m.updateMessageHistoryForm(key)
+	}
+	if m.messageExportForm != nil {
+		return m.updateMessageExportForm(key)
+	}
+	if m.messageRepublishForm != nil {
+		return m.updateMessageRepublishForm(key)
+	}
 	if m.consumerForm != nil {
 		return m.updateConsumerForm(key)
 	}
@@ -2012,6 +2098,9 @@ func (m Model) updateWorkspace(message tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if m.confirmStreamDelete {
 		return m.updateStreamDeleteConfirmation(key)
+	}
+	if m.confirmMessageDelete {
+		return m.updateMessageDeleteConfirmation(key)
 	}
 	if m.confirmKeyValueDelete {
 		return m.updateKeyValueDeleteConfirmation(key)
@@ -2201,6 +2290,11 @@ func (m Model) updateWorkspace(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.pendingConsumerAction = consumers.ActionReset
 		}
 	case "d":
+		if m.activeWorkspace == 3 && len(m.displayedMessages()) > 0 && !m.messageOperationRunning {
+			m.confirmMessageDelete = true
+			m.messageErr, m.messageNotice = nil, ""
+			return m, nil
+		}
 		if m.activeWorkspace == 5 && m.browsingObjects && len(m.displayedObjects()) > 0 && !m.objectOperationRunning {
 			if m.rejectObjectMirrorMutation() {
 				return m, nil
@@ -2255,6 +2349,12 @@ func (m Model) updateWorkspace(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	case "R":
+		if m.activeWorkspace == 3 && len(m.displayedMessages()) > 0 && !m.messageOperationRunning {
+			form := newMessageRepublishForm(m.displayedMessages()[m.messageCursor])
+			m.messageRepublishForm = &form
+			m.messageErr, m.messageNotice = nil, ""
+			return m, nil
+		}
 		if m.activeWorkspace == 1 && !m.streamActionRunning {
 			form := newStreamRestoreForm("")
 			m.streamTransferForm = &form
@@ -2297,10 +2397,44 @@ func (m Model) updateWorkspace(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case "H":
+		if m.activeWorkspace == 3 && !m.watching && !m.watchStarting {
+			form := newMessageHistoryForm(m.messageStream, m.streams, m.messageHistoryQuery)
+			m.messageHistoryForm = &form
+			m.messageErr = nil
+			return m, nil
+		}
 		if m.activeWorkspace == 4 && m.showKeyValueEntry && m.keyValueEntry != nil && m.loadKeyValueHistory != nil {
 			m.loadingKeyValueHistory = true
 			m.keyValueHistoryErr = nil
 			return m, tea.Batch(m.spinner.Tick, m.loadKeyValueHistory(m.keyValueEntry.Bucket, m.keyValueEntry.Key))
+		}
+	case "v":
+		if m.activeWorkspace == 3 {
+			m.messageInspectionMode = nextInspectionMode(m.messageInspectionMode)
+			m.messageDetailOffset = 0
+			m.messageErr = nil
+		}
+	case "E":
+		if m.activeWorkspace == 3 && len(m.displayedMessages()) > 0 && !m.messageOperationRunning {
+			form := newMessageExportForm(m.messageStream)
+			m.messageExportForm = &form
+			m.messageErr, m.messageNotice = nil, ""
+			return m, nil
+		}
+	case "f":
+		if m.activeWorkspace == 3 && (m.watching || m.watchStarting) {
+			if m.stopWatch != nil {
+				m.stopWatch()
+			}
+			m.watching, m.watchStarting, m.watchPaused = false, false, false
+			m.watchEvents = nil
+			m.watchFrozen = true
+			m.messageNotice = "Snapshot frozen; live subscription stopped"
+			return m, nil
+		}
+	case "y", "Y", "ctrl+y", "ctrl+h":
+		if m.activeWorkspace == 3 && len(m.displayedMessages()) > 0 {
+			return m.copySelectedMessage(key.String())
 		}
 	case "/":
 		if m.activeWorkspace == 3 && !m.showMessageDetail {
@@ -2636,7 +2770,7 @@ func (m Model) updateWorkspace(message tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) editingForm() bool {
-	return m.consumerForm != nil || m.streamForm != nil || m.streamPurgeForm != nil || m.streamTransferForm != nil ||
+	return m.consumerForm != nil || m.messageHistoryForm != nil || m.messageExportForm != nil || m.messageRepublishForm != nil || m.streamForm != nil || m.streamPurgeForm != nil || m.streamTransferForm != nil ||
 		m.keyValueForm != nil || m.keyValueEntryForm != nil || m.objectTransferForm != nil || m.objectEditForm != nil ||
 		m.objectLinkForm != nil || m.objectBucketForm != nil
 }
@@ -2895,6 +3029,9 @@ func (m Model) toggleMessageWatch() (tea.Model, tea.Cmd) {
 	}
 	m.messageErr = nil
 	m.watchStarting = true
+	m.watchFrozen = false
+	m.liveReceived, m.liveDropped = 0, 0
+	m.watchPressure, m.watchCapacity = 0, 0
 	if m.orderedWatch {
 		if m.startOrderedWatch == nil {
 			m.watchStarting = false
@@ -2943,6 +3080,14 @@ func (m *Model) prependLiveMessages(records []messages.Record) {
 		return
 	}
 	before := m.displayedMessages()
+	for index := range records {
+		if records[index].Stream == "" {
+			records[index].Stream = m.messageStream
+		}
+	}
+	if overflow := len(m.messages) + len(records) - messageBufferLimit; overflow > 0 {
+		m.liveDropped += uint64(overflow)
+	}
 	var selected messages.Record
 	keepSelection := m.messageCursor > 0 && m.messageCursor < len(before)
 	if keepSelection {
@@ -3140,6 +3285,15 @@ func (m Model) workspaceView(width, height int) string {
 	if m.streamTransferForm != nil || m.streamTransferStarting || m.streamTransferActive || m.streamTransferCanceling || m.streamTransferErr != nil {
 		return m.streamTransferView(width, height)
 	}
+	if m.messageHistoryForm != nil {
+		return m.messageHistoryFormView(width, height)
+	}
+	if m.messageExportForm != nil {
+		return m.messageExportFormView(width, height)
+	}
+	if m.messageRepublishForm != nil {
+		return m.messageRepublishFormView(width, height)
+	}
 	if m.keyValueEntryForm != nil {
 		return m.keyValueEntryFormView(width, height)
 	}
@@ -3157,6 +3311,9 @@ func (m Model) workspaceView(width, height int) string {
 	}
 	if m.confirmStreamDelete && len(m.streams) > 0 {
 		return m.streamDeleteConfirmationView(width, height)
+	}
+	if m.confirmMessageDelete && len(m.displayedMessages()) > 0 {
+		return m.messageDeleteConfirmationView(width, height)
 	}
 	if m.confirmKeyValueDelete && len(m.keyValueBuckets) > 0 {
 		return m.keyValueDeleteConfirmationView(width, height)
@@ -3544,6 +3701,11 @@ func (m Model) messagesView(width, height int) string {
 		breadcrumb = "Streams  ›  " + m.messageStream + "  ›  Monitor"
 	}
 	heading := lipgloss.NewStyle().Foreground(m.theme.muted).Render(breadcrumb)
+	if m.messageOperationRunning {
+		heading += "  " + lipgloss.NewStyle().Foreground(m.theme.yellow).Render(m.spinner.View()+" working…")
+	} else if m.messageNotice != "" {
+		heading += "  " + lipgloss.NewStyle().Foreground(m.theme.mint).Render("✓ "+m.messageNotice)
+	}
 	if m.loadingMessages {
 		return heading + "\n\n" + lipgloss.NewStyle().Foreground(m.theme.accent).Render(m.spinner.View()+" Loading recent messages…")
 	}
@@ -3603,7 +3765,17 @@ func (m Model) watchStatusView() string {
 		if m.orderedWatch {
 			mode = "ORDERED"
 		}
-		return lipgloss.NewStyle().Foreground(m.theme.mint).Render(fmt.Sprintf("● %s  %d received", mode, m.liveReceived))
+		pressure := ""
+		if m.watchCapacity > 0 {
+			pressure = fmt.Sprintf("  •  queue %d/%d", m.watchPressure, m.watchCapacity)
+		}
+		dropped := ""
+		if m.liveDropped > 0 {
+			dropped = fmt.Sprintf("  •  %d not retained", m.liveDropped)
+		}
+		return lipgloss.NewStyle().Foreground(m.theme.mint).Render(fmt.Sprintf("● %s  %d received%s%s", mode, m.liveReceived, pressure, dropped))
+	case m.watchFrozen:
+		return lipgloss.NewStyle().Foreground(m.theme.cyan).Render(fmt.Sprintf("❄ FROZEN  %d received  •  w resume live", m.liveReceived))
 	default:
 		mode := "core"
 		if m.orderedWatch {
@@ -3625,7 +3797,7 @@ func (m Model) messageListPane(records []messages.Record, width, height int) str
 	for index := start; index < end; index++ {
 		rows = append(rows, m.messageRow(records[index], index == m.messageCursor, width))
 	}
-	hint := lipgloss.NewStyle().Foreground(m.theme.muted).Render("↑/↓ select  •  enter detail  •  o ordered  •  w watch  •  space pause")
+	hint := lipgloss.NewStyle().Foreground(m.theme.muted).Render("↑/↓ select  •  enter detail  •  H query  •  E export  •  R republish  •  d delete  •  f freeze")
 	return strings.Join([]string{header, columns, strings.Join(rows, "\n"), hint}, "\n")
 }
 
@@ -3653,6 +3825,58 @@ func visibleWindow(total, cursor, capacity int) (int, int) {
 	return start, end
 }
 
+func nextInspectionMode(current messages.InspectionMode) messages.InspectionMode {
+	values := []messages.InspectionMode{messages.InspectAuto, messages.InspectJSON, messages.InspectXML, messages.InspectText, messages.InspectHex, messages.InspectBinary}
+	for index, value := range values {
+		if value == current {
+			return values[(index+1)%len(values)]
+		}
+	}
+	return messages.InspectAuto
+}
+
+func messageValueOr(value, fallback string) string {
+	if value == "" {
+		return fallback
+	}
+	return value
+}
+
+func (m Model) copySelectedMessage(action string) (tea.Model, tea.Cmd) {
+	if m.copyValue == nil {
+		m.messageErr = errors.New("clipboard integration is unavailable")
+		return m, nil
+	}
+	records := m.displayedMessages()
+	if m.messageCursor < 0 || m.messageCursor >= len(records) {
+		return m, nil
+	}
+	record := records[m.messageCursor]
+	var content, label string
+	switch action {
+	case "ctrl+y":
+		content, label = record.Subject, "subject"
+	case "ctrl+h":
+		content, label = messages.HeadersText(record.Headers), "headers"
+	case "Y":
+		var err error
+		content, err = messages.CompleteMessage(record)
+		if err != nil {
+			m.messageErr = err
+			return m, nil
+		}
+		label = "complete message"
+	default:
+		content, label = string(record.Payload), "payload"
+	}
+	if err := m.copyValue(content); err != nil {
+		m.messageErr = fmt.Errorf("copy %s: %w", label, err)
+		return m, nil
+	}
+	m.messageErr, m.messageNotice = nil, label+" copied"
+	return m, nil
+}
+
 func (m Model) messagePreviewPane(width, height int, record messages.Record) string {
 	title := lipgloss.NewStyle().Bold(true).Foreground(m.theme.accent).Render("MESSAGE DETAIL")
 	label := lipgloss.NewStyle().Foreground(m.theme.muted)
@@ -3667,33 +3891,69 @@ func (m Model) messagePreviewPane(width, height int, record messages.Record) str
 		label.Render("Size:     ") + value.Render(humanBytes(uint64(len(record.Payload)))),
 		label.Render("Stream:   ") + value.Render(m.messageStream),
 		label.Render("Sequence: ") + value.Render(fmt.Sprintf("%d", record.Sequence)),
+		label.Render("Headers:  ") + value.Render(fmt.Sprintf("%d", len(record.Headers))),
+	}
+	payload, resolvedMode, inspectErr := messages.InspectPayload(record.Payload, m.messageInspectionMode)
+	if inspectErr != nil {
+		payload = inspectErr.Error()
 	}
 	payloadHeight := max(height-len(metadata)-4, 1)
-	lines := wrapLines(prettyPayload(record.Payload), max(width, 1))
+	lines := wrapLines(payload, max(width, 1))
 	lines = lines[:min(len(lines), payloadHeight)]
-	for index, line := range lines {
-		lines[index] = m.highlightJSONLine(line)
+	if resolvedMode == messages.InspectJSON && inspectErr == nil {
+		for index, line := range lines {
+			lines[index] = m.highlightJSONLine(line)
+		}
 	}
-	payloadLabel := label.Render("Payload:")
+	payloadLabel := label.Render("Payload [" + string(resolvedMode) + "]:")
 	return title + "\n" + strings.Join(metadata, "\n") + "\n\n" + payloadLabel + "\n" + strings.Join(lines, "\n")
 }
 
 func (m Model) messageDetailView(width, height int, record messages.Record) string {
 	title := lipgloss.NewStyle().Bold(true).Foreground(m.theme.accent).Render(fmt.Sprintf("#%d  %s", record.Sequence, record.Subject))
-	meta := lipgloss.NewStyle().Foreground(m.theme.muted).Render(record.Time.Local().Format(time.RFC3339Nano))
-	lines := wrapLines(prettyPayload(record.Payload), max(width-2, 1))
-	visibleHeight := max(height-5, 1)
+	label := lipgloss.NewStyle().Foreground(m.theme.muted)
+	value := lipgloss.NewStyle().Foreground(m.theme.secondary)
+	stream := record.Stream
+	if stream == "" {
+		stream = m.messageStream
+	}
+	metadata := []string{
+		label.Render("Time:              ") + value.Render(record.Time.Local().Format(time.RFC3339Nano)),
+		label.Render("Stream sequence:   ") + value.Render(strconv.FormatUint(record.Sequence, 10)),
+		label.Render("Consumer sequence: ") + value.Render(strconv.FormatUint(record.ConsumerSequence, 10)),
+		label.Render("Stream / consumer: ") + value.Render(stream+" / "+messageValueOr(record.Consumer, "—")),
+		label.Render("Domain:            ") + value.Render(messageValueOr(record.Domain, "—")),
+		label.Render("Deliveries/pending: ") + value.Render(fmt.Sprintf("%d / %d", record.Deliveries, record.Pending)),
+	}
+	headerLines := wrapLines(messages.HeadersText(record.Headers), max(width-2, 1))
+	if len(headerLines) == 0 {
+		headerLines = []string{"—"}
+	}
+	payload, resolvedMode, inspectErr := messages.InspectPayload(record.Payload, m.messageInspectionMode)
+	if inspectErr != nil {
+		payload = inspectErr.Error()
+	}
+	payloadLines := wrapLines(payload, max(width-2, 1))
+	lines := append([]string{}, metadata...)
+	lines = append(lines, "", label.Render("HEADERS"))
+	for _, line := range headerLines {
+		lines = append(lines, value.Render(line))
+	}
+	lines = append(lines, "", label.Render("PAYLOAD ["+strings.ToUpper(string(resolvedMode))+"]"))
+	for _, line := range payloadLines {
+		if resolvedMode == messages.InspectJSON && inspectErr == nil {
+			line = m.highlightJSONLine(line)
+		}
+		lines = append(lines, line)
+	}
+	visibleHeight := max(height-4, 1)
 	maxOffset := max(len(lines)-visibleHeight, 0)
 	offset := min(m.messageDetailOffset, maxOffset)
 	end := min(offset+visibleHeight, len(lines))
-	visible := make([]string, 0, end-offset)
-	for _, line := range lines[offset:end] {
-		visible = append(visible, m.highlightJSONLine(line))
-	}
-	payload := strings.Join(visible, "\n")
+	visible := lines[offset:end]
 	position := lipgloss.NewStyle().Foreground(m.theme.muted).Render(fmt.Sprintf("lines %d-%d/%d", offset+1, end, len(lines)))
-	hint := lipgloss.NewStyle().Foreground(m.theme.muted).Render("↑/↓ scroll   esc back")
-	return title + "\n" + meta + "\n\n" + payload + "\n" + position + "  " + hint
+	hint := lipgloss.NewStyle().Foreground(m.theme.muted).Render("↑/↓ scroll  •  v mode  •  y payload  •  Y full  •  ctrl+y subject  •  ctrl+h headers  •  esc back")
+	return title + "\n\n" + strings.Join(visible, "\n") + "\n" + position + "  " + hint
 }
 
 func (m Model) highlightJSONLine(line string) string {

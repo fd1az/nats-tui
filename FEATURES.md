@@ -120,7 +120,7 @@ application and adapter boundaries.
 - [x] Consumer throughput and lag history.
 - [x] Inspect redeliveries and delivery failures.
 
-## Message Monitor and Live Watch — Partial
+## Message Monitor and Live Watch — Complete
 
 - [x] Load recent stored messages.
 - [x] Responsive list and synchronized preview.
@@ -131,17 +131,17 @@ application and adapter boundaries.
 - [x] Pause/resume live rendering.
 - [x] Bounded message buffer and batched UI updates.
 - [x] Preserve stable selection while live messages arrive.
-- [ ] Select history start time, sequence, and result limit.
-- [ ] Filter by subject before loading history.
-- [ ] JSONPath/JMESPath payload filtering.
-- [ ] XML, text, hex, and binary inspection modes.
-- [ ] Full header and JetStream metadata panel.
-- [ ] Copy subject, payload, headers, or complete message.
-- [ ] Save/export selected messages to disk.
-- [ ] Publish or republish a message.
-- [ ] Delete a stored message with confirmation.
-- [ ] Dropped-message and subscription-pressure telemetry.
-- [ ] Freeze a live snapshot for offline inspection.
+- [x] Select history start time, sequence, and result limit.
+- [x] Filter by subject before loading history.
+- [x] JSONPath/JMESPath payload filtering.
+- [x] XML, text, hex, and binary inspection modes.
+- [x] Full header and JetStream metadata panel.
+- [x] Copy subject, payload, headers, or complete message.
+- [x] Save/export selected messages to disk.
+- [x] Publish or republish a message.
+- [x] Delete a stored message with confirmation.
+- [x] Dropped-message and subscription-pressure telemetry.
+- [x] Freeze a live snapshot for offline inspection.
 
 ## Subject Explorer — Partial
 
