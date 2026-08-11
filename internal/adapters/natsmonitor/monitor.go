@@ -1243,6 +1243,27 @@ func (m *Monitor) OperateConsumer(ctx context.Context, command consumers.Command
 	return nil
 }
 
+func (m *Monitor) OperateConsumerConfig(ctx context.Context, command consumers.ConfigCommand) error {
+	definition := command.Definition
+	stream, err := m.jetstream.Stream(ctx, definition.Stream)
+	if err != nil {
+		return fmt.Errorf("open stream %q: %w", definition.Stream, err)
+	}
+	config := consumerConfigToNATS(definition)
+	switch command.Action {
+	case consumers.ConfigCreate:
+		_, err = stream.CreateConsumer(ctx, config)
+	case consumers.ConfigUpdate:
+		_, err = stream.UpdateConsumer(ctx, config)
+	default:
+		return fmt.Errorf("unsupported consumer configuration action %d", command.Action)
+	}
+	if err != nil {
+		return fmt.Errorf("configure consumer %q on stream %q: %w", definition.Name, definition.Stream, err)
+	}
+	return nil
+}
+
 func consumerSummary(info *jetstream.ConsumerInfo) consumers.Summary {
 	filters := append([]string(nil), info.Config.FilterSubjects...)
 	if info.Config.FilterSubject != "" {
@@ -1268,7 +1289,120 @@ func consumerSummary(info *jetstream.ConsumerInfo) consumers.Summary {
 		Push:            info.Config.DeliverSubject != "",
 		CreatedAt:       info.Created,
 		LastActiveAt:    lastActive,
+		Config:          consumerConfigFromNATS(info.Stream, info.Name, info.Config),
 	}
+}
+
+func consumerConfigToNATS(definition consumers.Definition) jetstream.ConsumerConfig {
+	config := jetstream.ConsumerConfig{
+		Name: definition.Name, Description: definition.Description,
+		DeliverPolicy: consumerDeliverPolicyToNATS(definition.DeliverPolicy), OptStartSeq: definition.StartSequence, OptStartTime: definition.StartTime,
+		AckPolicy: consumerAckPolicyToNATS(definition.AckPolicy), AckWait: definition.AckWait, MaxDeliver: definition.MaxDeliver,
+		BackOff: append([]time.Duration(nil), definition.Backoff...), FilterSubjects: append([]string(nil), definition.FilterSubjects...),
+		ReplayPolicy: consumerReplayPolicyToNATS(definition.ReplayPolicy), RateLimit: definition.RateLimit, SampleFrequency: definition.SampleFrequency,
+		MaxWaiting: definition.MaxWaiting, MaxAckPending: definition.MaxAckPending, HeadersOnly: definition.HeadersOnly,
+		MaxRequestBatch: definition.MaxRequestBatch, MaxRequestExpires: definition.MaxRequestExpires, MaxRequestMaxBytes: definition.MaxRequestMaxBytes,
+		InactiveThreshold: definition.InactiveThreshold, Replicas: definition.Replicas, MemoryStorage: definition.MemoryStorage,
+		Metadata: cloneStringMap(definition.Metadata), DeliverSubject: definition.DeliverSubject, DeliverGroup: definition.DeliverGroup,
+		FlowControl: definition.FlowControl, IdleHeartbeat: definition.IdleHeartbeat,
+	}
+	if len(definition.FilterSubjects) == 1 {
+		config.FilterSubject = definition.FilterSubjects[0]
+		config.FilterSubjects = nil
+	}
+	if definition.Durable {
+		config.Durable = definition.Name
+	}
+	return config
+}
+
+func consumerConfigFromNATS(stream, name string, config jetstream.ConsumerConfig) consumers.Definition {
+	filters := append([]string(nil), config.FilterSubjects...)
+	if config.FilterSubject != "" {
+		filters = append(filters, config.FilterSubject)
+	}
+	return consumers.Definition{
+		Stream: stream, Name: name, Description: config.Description, Durable: config.Durable != "",
+		DeliverSubject: config.DeliverSubject, DeliverGroup: config.DeliverGroup,
+		DeliverPolicy: consumerDeliverPolicyFromNATS(config.DeliverPolicy), StartSequence: config.OptStartSeq, StartTime: config.OptStartTime,
+		AckPolicy: consumerAckPolicyFromNATS(config.AckPolicy), AckWait: config.AckWait, MaxDeliver: config.MaxDeliver,
+		Backoff: append([]time.Duration(nil), config.BackOff...), FilterSubjects: filters,
+		ReplayPolicy: consumerReplayPolicyFromNATS(config.ReplayPolicy), RateLimit: config.RateLimit, SampleFrequency: config.SampleFrequency,
+		MaxWaiting: config.MaxWaiting, MaxAckPending: config.MaxAckPending, HeadersOnly: config.HeadersOnly,
+		MaxRequestBatch: config.MaxRequestBatch, MaxRequestExpires: config.MaxRequestExpires, MaxRequestMaxBytes: config.MaxRequestMaxBytes,
+		InactiveThreshold: config.InactiveThreshold, Replicas: config.Replicas, MemoryStorage: config.MemoryStorage,
+		Metadata: cloneStringMap(config.Metadata), FlowControl: config.FlowControl, IdleHeartbeat: config.IdleHeartbeat,
+	}
+}
+
+func consumerDeliverPolicyToNATS(policy consumers.DeliverPolicy) jetstream.DeliverPolicy {
+	switch policy {
+	case consumers.DeliverLast:
+		return jetstream.DeliverLastPolicy
+	case consumers.DeliverNew:
+		return jetstream.DeliverNewPolicy
+	case consumers.DeliverByStartSequence:
+		return jetstream.DeliverByStartSequencePolicy
+	case consumers.DeliverByStartTime:
+		return jetstream.DeliverByStartTimePolicy
+	case consumers.DeliverLastPerSubject:
+		return jetstream.DeliverLastPerSubjectPolicy
+	default:
+		return jetstream.DeliverAllPolicy
+	}
+}
+
+func consumerDeliverPolicyFromNATS(policy jetstream.DeliverPolicy) consumers.DeliverPolicy {
+	switch policy {
+	case jetstream.DeliverLastPolicy:
+		return consumers.DeliverLast
+	case jetstream.DeliverNewPolicy:
+		return consumers.DeliverNew
+	case jetstream.DeliverByStartSequencePolicy:
+		return consumers.DeliverByStartSequence
+	case jetstream.DeliverByStartTimePolicy:
+		return consumers.DeliverByStartTime
+	case jetstream.DeliverLastPerSubjectPolicy:
+		return consumers.DeliverLastPerSubject
+	default:
+		return consumers.DeliverAll
+	}
+}
+
+func consumerAckPolicyToNATS(policy consumers.AckPolicy) jetstream.AckPolicy {
+	switch policy {
+	case consumers.AckNone:
+		return jetstream.AckNonePolicy
+	case consumers.AckAll:
+		return jetstream.AckAllPolicy
+	default:
+		return jetstream.AckExplicitPolicy
+	}
+}
+
+func consumerAckPolicyFromNATS(policy jetstream.AckPolicy) consumers.AckPolicy {
+	switch policy {
+	case jetstream.AckNonePolicy:
+		return consumers.AckNone
+	case jetstream.AckAllPolicy:
+		return consumers.AckAll
+	default:
+		return consumers.AckExplicit
+	}
+}
+
+func consumerReplayPolicyToNATS(policy consumers.ReplayPolicy) jetstream.ReplayPolicy {
+	if policy == consumers.ReplayOriginal {
+		return jetstream.ReplayOriginalPolicy
+	}
+	return jetstream.ReplayInstantPolicy
+}
+
+func consumerReplayPolicyFromNATS(policy jetstream.ReplayPolicy) consumers.ReplayPolicy {
+	if policy == jetstream.ReplayOriginalPolicy {
+		return consumers.ReplayOriginal
+	}
+	return consumers.ReplayInstant
 }
 
 func (m *Monitor) RecentMessages(ctx context.Context, streamName string, limit int) ([]messages.Record, error) {
@@ -1332,6 +1466,46 @@ func (m *Monitor) Watch(ctx context.Context, subjects []string) (<-chan messages
 
 	events := make(chan messages.Record, 512)
 	go forwardMessages(ctx, incoming, events, subscriptions, m.now)
+	return events, nil
+}
+
+func (m *Monitor) WatchOrdered(ctx context.Context, streamName string, subjects []string) (<-chan messages.Record, error) {
+	stream, err := m.jetstream.Stream(ctx, streamName)
+	if err != nil {
+		return nil, fmt.Errorf("open stream %q for ordered watch: %w", streamName, err)
+	}
+	consumer, err := stream.OrderedConsumer(ctx, jetstream.OrderedConsumerConfig{
+		FilterSubjects: append([]string(nil), subjects...), DeliverPolicy: jetstream.DeliverNewPolicy,
+		ReplayPolicy: jetstream.ReplayInstantPolicy, InactiveThreshold: 5 * time.Minute,
+		Metadata: map[string]string{"nats-tui.mode": "ordered-watch"}, NamePrefix: "nats_tui_watch",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create ordered consumer for %q: %w", streamName, err)
+	}
+	events := make(chan messages.Record, 512)
+	consume, err := consumer.Consume(func(message jetstream.Msg) {
+		metadata, metadataErr := message.Metadata()
+		if metadataErr != nil {
+			return
+		}
+		record := messages.Record{Sequence: metadata.Sequence.Stream, Subject: message.Subject(), Time: metadata.Timestamp, Headers: cloneHeader(message.Headers()), Payload: append([]byte(nil), message.Data()...)}
+		select {
+		case events <- record:
+		case <-ctx.Done():
+		}
+	})
+	if err != nil {
+		return nil, fmt.Errorf("start ordered watch for %q: %w", streamName, err)
+	}
+	go func() {
+		select {
+		case <-ctx.Done():
+			consume.Stop()
+		case <-consume.Closed():
+		}
+		<-consume.Closed()
+		close(events)
+	}()
 	return events, nil
 }
 

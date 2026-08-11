@@ -38,11 +38,12 @@ const (
 const minimumConnectionDisplay = 450 * time.Millisecond
 
 const (
-	messageBufferLimit = 2_000
-	watchBatchLimit    = 100
-	watchBatchInterval = 50 * time.Millisecond
-	refreshInterval    = 3 * time.Second
-	refreshRetryDelay  = 2 * time.Second
+	messageBufferLimit   = 2_000
+	consumerHistoryLimit = 60
+	watchBatchLimit      = 100
+	watchBatchInterval   = 50 * time.Millisecond
+	refreshInterval      = 3 * time.Second
+	refreshRetryDelay    = 2 * time.Second
 )
 
 type ConnectionInput struct {
@@ -53,9 +54,11 @@ type ConnectionInput struct {
 type ConnectFunc func(ConnectionInput) tea.Cmd
 type LoadMessagesFunc func(string) tea.Cmd
 type StartWatchFunc func(string, []string) tea.Cmd
+type StartOrderedWatchFunc func(string, []string) tea.Cmd
 type StopWatchFunc func()
 type RefreshFunc func(uint64) tea.Cmd
 type ConsumerActionFunc func(ConsumerActionInput) tea.Cmd
+type ConsumerConfigFunc func(ConsumerConfigInput) tea.Cmd
 type StreamActionFunc func(StreamActionInput) tea.Cmd
 type StreamPurgeFunc func(StreamPurgeInput) tea.Cmd
 type StartStreamBackupFunc func(streams.BackupFile) tea.Cmd
@@ -111,6 +114,19 @@ type ConsumerActionInput struct {
 	Action     consumers.Action
 }
 
+type ConsumerConfigInput struct {
+	Generation uint64
+	Action     consumers.ConfigAction
+	Definition consumers.Definition
+}
+
+type consumerMetricSample struct {
+	At        time.Time
+	Lag       uint64
+	Delivered uint64
+	Rate      float64
+}
+
 type StreamActionInput struct {
 	Generation uint64
 	Action     streams.Action
@@ -160,6 +176,7 @@ type Model struct {
 	connect                      ConnectFunc
 	loadMessages                 LoadMessagesFunc
 	startWatch                   StartWatchFunc
+	startOrderedWatch            StartOrderedWatchFunc
 	stopWatch                    StopWatchFunc
 	refresh                      RefreshFunc
 	consumerAction               ConsumerActionFunc
@@ -234,6 +251,9 @@ type Model struct {
 	streamActionNotice           string
 	consumers                    []consumers.Summary
 	consumerCursor               int
+	consumerForm                 *consumerForm
+	consumerConfigure            ConsumerConfigFunc
+	consumerHistory              map[consumerID][]consumerMetricSample
 	showConsumerDetail           bool
 	keyValueBuckets              []kvstore.BucketSummary
 	keyValueCursor               int
@@ -333,6 +353,7 @@ type Model struct {
 	searchQuery                  string
 	searchMode                   bool
 	watchStarting                bool
+	orderedWatch                 bool
 	watching                     bool
 	watchPaused                  bool
 	watchEvents                  <-chan messages.Record
@@ -396,6 +417,11 @@ type refreshFailedMsg struct {
 type consumerActionSucceededMsg struct{ input ConsumerActionInput }
 type consumerActionFailedMsg struct {
 	input ConsumerActionInput
+	err   error
+}
+type consumerConfigSucceededMsg struct{ input ConsumerConfigInput }
+type consumerConfigFailedMsg struct {
+	input ConsumerConfigInput
 	err   error
 }
 type streamActionSucceededMsg struct{ input StreamActionInput }
@@ -544,14 +570,15 @@ func NewModel(profile, server string, connect ConnectFunc, loaders ...LoadMessag
 	loader.Style = lipgloss.NewStyle().Foreground(colors.accent)
 
 	model := Model{
-		profile:      profile,
-		connect:      connect,
-		serverInput:  serverInput,
-		spinner:      loader,
-		screen:       screenWelcome,
-		theme:        colors,
-		runtime:      systemRuntime{},
-		requestReply: newRequestReplyState(colors),
+		profile:         profile,
+		connect:         connect,
+		serverInput:     serverInput,
+		spinner:         loader,
+		screen:          screenWelcome,
+		theme:           colors,
+		runtime:         systemRuntime{},
+		requestReply:    newRequestReplyState(colors),
+		consumerHistory: make(map[consumerID][]consumerMetricSample),
 	}
 	if len(loaders) > 0 {
 		model.loadMessages = loaders[0]
@@ -573,6 +600,11 @@ func (m Model) WithMessageWatch(start StartWatchFunc, stop StopWatchFunc) Model 
 	return m
 }
 
+func (m Model) WithOrderedMessageWatch(start StartOrderedWatchFunc) Model {
+	m.startOrderedWatch = start
+	return m
+}
+
 func (m Model) WithRefresh(refresh RefreshFunc) Model {
 	m.refresh = refresh
 	return m
@@ -580,6 +612,11 @@ func (m Model) WithRefresh(refresh RefreshFunc) Model {
 
 func (m Model) WithConsumerActions(action ConsumerActionFunc) Model {
 	m.consumerAction = action
+	return m
+}
+
+func (m Model) WithConsumerConfiguration(configure ConsumerConfigFunc) Model {
+	m.consumerConfigure = configure
 	return m
 }
 
@@ -749,6 +786,14 @@ func ConsumerActionFailed(generation uint64, input ConsumerActionInput, err erro
 	return consumerActionFailedMsg{input: input, err: err}
 }
 
+func ConsumerConfigSucceeded(input ConsumerConfigInput) tea.Msg {
+	return consumerConfigSucceededMsg{input: input}
+}
+
+func ConsumerConfigFailed(input ConsumerConfigInput, err error) tea.Msg {
+	return consumerConfigFailedMsg{input: input, err: err}
+}
+
 func StreamActionSucceeded(generation uint64, input StreamActionInput) tea.Msg {
 	input.Generation = generation
 	return streamActionSucceededMsg{input: input}
@@ -897,6 +942,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m.showConnection()
 	case connectedMsg:
 		m.profile = msg.profile
+		m.recordConsumerMetrics(msg.snapshot.ObservedAt, msg.consumers)
 		m.snapshot = msg.snapshot
 		m.streams = append([]streams.Summary(nil), msg.streams...)
 		m.streamCursor = 0
@@ -1033,6 +1079,25 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshing = false
 		return m.startRefresh()
 	case consumerActionFailedMsg:
+		if msg.input.Generation != m.refreshGeneration {
+			return m, nil
+		}
+		m.consumerActionRunning = false
+		m.consumerActionErr = msg.err
+		return m, nil
+	case consumerConfigSucceededMsg:
+		if msg.input.Generation != m.refreshGeneration {
+			return m, nil
+		}
+		m.consumerActionRunning = false
+		m.consumerActionErr = nil
+		m.consumerActionNotice = "consumer configuration saved"
+		m.consumerForm = nil
+		m.showConsumerDetail = false
+		m.refreshGeneration++
+		m.refreshing = false
+		return m.startRefresh()
+	case consumerConfigFailedMsg:
 		if msg.input.Generation != m.refreshGeneration {
 			return m, nil
 		}
@@ -1822,7 +1887,7 @@ func (m Model) updateWorkspace(message tea.Msg) (tea.Model, tea.Cmd) {
 	if m.bookmarks.open {
 		return m.updateBookmarks(key)
 	}
-	if key.String() == "ctrl+k" || (key.String() == ":" && m.activeWorkspace != 7) {
+	if key.String() == "ctrl+k" || (key.String() == ":" && m.activeWorkspace != 7 && !m.editingForm()) {
 		m.openCommandBar(commandPalette)
 		return m, nil
 	}
@@ -1933,6 +1998,9 @@ func (m Model) updateWorkspace(message tea.Msg) (tea.Model, tea.Cmd) {
 	if m.streamForm != nil {
 		return m.updateStreamForm(key)
 	}
+	if m.consumerForm != nil {
+		return m.updateConsumerForm(key)
+	}
 	if m.streamPurgeForm != nil {
 		return m.updateStreamPurgeForm(key)
 	}
@@ -2030,6 +2098,12 @@ func (m Model) updateWorkspace(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m.startRefresh()
 	case "n":
+		if m.activeWorkspace == 2 && !m.consumerActionRunning {
+			form := newCreateConsumerForm(m.streams)
+			m.consumerForm = &form
+			m.consumerActionErr = nil
+			m.consumerActionNotice = ""
+		}
 		if m.activeWorkspace == 1 && !m.streamActionRunning {
 			form := newCreateStreamForm()
 			m.streamForm = &form
@@ -2080,6 +2154,12 @@ func (m Model) updateWorkspace(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.objectOperationNotice = ""
 		}
 	case "e":
+		if m.activeWorkspace == 2 && len(m.consumers) > 0 && !m.consumerActionRunning {
+			form := newEditConsumerForm(m.consumers[m.consumerCursor])
+			m.consumerForm = &form
+			m.consumerActionErr = nil
+			m.consumerActionNotice = ""
+		}
 		if m.activeWorkspace == 1 && len(m.streams) > 0 && !m.streamActionRunning {
 			form := newEditStreamForm(m.streams[m.streamCursor])
 			m.streamForm = &form
@@ -2241,6 +2321,11 @@ func (m Model) updateWorkspace(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.activeWorkspace == 6 {
 			return m.startSelectedSubjectWatch()
+		}
+	case "o":
+		if m.activeWorkspace == 3 && !m.showMessageDetail && !m.watching && !m.watchStarting {
+			m.orderedWatch = !m.orderedWatch
+			m.messageErr = nil
 		}
 	case " ":
 		if m.activeWorkspace == 3 && m.watching {
@@ -2550,6 +2635,12 @@ func (m Model) updateWorkspace(message tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) editingForm() bool {
+	return m.consumerForm != nil || m.streamForm != nil || m.streamPurgeForm != nil || m.streamTransferForm != nil ||
+		m.keyValueForm != nil || m.keyValueEntryForm != nil || m.objectTransferForm != nil || m.objectEditForm != nil ||
+		m.objectLinkForm != nil || m.objectBucketForm != nil
+}
+
 func (m Model) canOperateConsumer() bool {
 	return m.activeWorkspace == 2 && len(m.consumers) > 0 && !m.consumerActionRunning
 }
@@ -2698,6 +2789,7 @@ func (m *Model) applyRefresh(msg refreshedMsg) {
 	selectedStream := selectedStreamName(m.streams, m.streamCursor)
 	selectedConsumer := selectedConsumerID(m.consumers, m.consumerCursor)
 	selectedBucket := selectedBucketName(m.keyValueBuckets, m.keyValueCursor)
+	m.recordConsumerMetrics(msg.snapshot.ObservedAt, msg.consumers)
 	m.snapshot = msg.snapshot
 	m.streams = append(m.streams[:0], msg.streams...)
 	m.consumers = append(m.consumers[:0], msg.consumers...)
@@ -2710,6 +2802,39 @@ func (m *Model) applyRefresh(msg refreshedMsg) {
 	m.subjectCursor = findSubject(m.displayedSubjects(), selectedSubject)
 	m.refreshing = false
 	m.refreshErr = nil
+}
+
+func (m *Model) recordConsumerMetrics(at time.Time, values []consumers.Summary) {
+	if at.IsZero() {
+		at = m.runtime.Now()
+	}
+	if m.consumerHistory == nil {
+		m.consumerHistory = make(map[consumerID][]consumerMetricSample)
+	}
+	alive := make(map[consumerID]struct{}, len(values))
+	for _, value := range values {
+		id := consumerID{stream: value.Stream, name: value.Name}
+		alive[id] = struct{}{}
+		history := m.consumerHistory[id]
+		rate := float64(0)
+		if len(history) > 0 {
+			previous := history[len(history)-1]
+			elapsed := at.Sub(previous.At).Seconds()
+			if elapsed > 0 && value.DeliveredStream >= previous.Delivered {
+				rate = float64(value.DeliveredStream-previous.Delivered) / elapsed
+			}
+		}
+		history = append(history, consumerMetricSample{At: at, Lag: value.Lag(), Delivered: value.DeliveredStream, Rate: rate})
+		if len(history) > consumerHistoryLimit {
+			history = append([]consumerMetricSample(nil), history[len(history)-consumerHistoryLimit:]...)
+		}
+		m.consumerHistory[id] = history
+	}
+	for id := range m.consumerHistory {
+		if _, exists := alive[id]; !exists {
+			delete(m.consumerHistory, id)
+		}
+	}
 }
 
 func selectedStreamName(streamCatalog []streams.Summary, cursor int) string {
@@ -2756,7 +2881,7 @@ func (m Model) toggleMessageWatch() (tea.Model, tea.Cmd) {
 		m.watchPaused = false
 		return m, nil
 	}
-	if m.startWatch == nil || m.messageStream == "" {
+	if (!m.orderedWatch && m.startWatch == nil) || (m.orderedWatch && m.startOrderedWatch == nil) || m.messageStream == "" {
 		m.messageErr = errors.New("select a stream before starting live watch")
 		return m, nil
 	}
@@ -2770,6 +2895,14 @@ func (m Model) toggleMessageWatch() (tea.Model, tea.Cmd) {
 	}
 	m.messageErr = nil
 	m.watchStarting = true
+	if m.orderedWatch {
+		if m.startOrderedWatch == nil {
+			m.watchStarting = false
+			m.messageErr = errors.New("ordered JetStream watch is unavailable")
+			return m, nil
+		}
+		return m, tea.Batch(m.spinner.Tick, m.startOrderedWatch(m.messageStream, patterns))
+	}
 	return m, tea.Batch(m.spinner.Tick, m.startWatch(m.messageStream, patterns))
 }
 
@@ -3015,6 +3148,9 @@ func (m Model) workspaceView(width, height int) string {
 	}
 	if m.streamForm != nil {
 		return m.streamFormView(width, height)
+	}
+	if m.consumerForm != nil {
+		return m.consumerFormView(width, height)
 	}
 	if m.streamPurgeForm != nil {
 		return m.streamPurgeFormView(width, height)
@@ -3269,7 +3405,7 @@ func (m Model) consumerListPane(width, height int) string {
 	for index := start; index < end; index++ {
 		rows = append(rows, m.consumerRow(m.consumers[index], index == m.consumerCursor, width))
 	}
-	hint := lipgloss.NewStyle().Foreground(m.theme.muted).Render("↑/↓ select  •  p pause/resume  •  x reset  •  d delete")
+	hint := lipgloss.NewStyle().Foreground(m.theme.muted).Render("↑/↓ select  •  n create  •  e edit  •  p pause/resume  •  x reset  •  d delete")
 	return strings.Join([]string{header, columns, strings.Join(rows, "\n"), hint}, "\n")
 }
 
@@ -3312,6 +3448,9 @@ func (m Model) consumerDetail(width int, consumer consumers.Summary, full bool) 
 	if filters == "" {
 		filters = "all stream subjects"
 	}
+	history := m.consumerHistory[consumerID{stream: consumer.Stream, name: consumer.Name}]
+	lagTrend, rate := consumerTrend(history, max(min(width-20, 24), 6))
+	failures := m.consumerFailures(consumer.Stream, consumer.Name)
 	lines := []string{
 		lipgloss.NewStyle().Bold(true).Foreground(m.theme.accent).Render(title),
 		"",
@@ -3324,11 +3463,65 @@ func (m Model) consumerDetail(width int, consumer consumers.Summary, full bool) 
 		label.Render("Progress:     ") + value.Render(fmt.Sprintf("delivered #%d  •  ack floor #%d", consumer.DeliveredStream, consumer.AckFloorStream)),
 		label.Render("Last active:  ") + value.Render(lastActive),
 		label.Render("Filters:      ") + value.Render(truncate(filters, max(width-14, 8))),
+		"",
+		label.Render("Deliver:      ") + value.Render(string(consumer.Config.DeliverPolicy)),
+		label.Render("Ack:          ") + value.Render(fmt.Sprintf("%s  •  wait %s  •  max %d", consumer.Config.AckPolicy, consumer.Config.AckWait, consumer.Config.MaxDeliver)),
+		label.Render("Replay:       ") + value.Render(string(consumer.Config.ReplayPolicy)),
+		label.Render("Backpressure: ") + value.Render(fmt.Sprintf("%d ack pending  •  %d waiting", consumer.Config.MaxAckPending, consumer.Config.MaxWaiting)),
+		label.Render("Lag history:   ") + lipgloss.NewStyle().Foreground(m.theme.cyan).Render(lagTrend) + value.Render(fmt.Sprintf("  •  %.1f msg/s", rate)),
+		label.Render("Failures:      ") + value.Render(fmt.Sprintf("%d delivery advisories", len(failures))),
+	}
+	if full && len(failures) > 0 {
+		lines = append(lines, "", label.Render("RECENT DELIVERY FAILURES"))
+		for index, failure := range failures {
+			if index == 3 {
+				break
+			}
+			lines = append(lines, lipgloss.NewStyle().Foreground(m.theme.red).Render("• "+truncate(failure.Title+" · "+failure.Description, max(width-2, 16))))
+		}
 	}
 	if full {
 		lines = append(lines, "", label.Render("esc back to consumers"))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func consumerTrend(history []consumerMetricSample, width int) (string, float64) {
+	if len(history) == 0 {
+		return strings.Repeat("·", width), 0
+	}
+	if len(history) > width {
+		history = history[len(history)-width:]
+	}
+	maximum := uint64(0)
+	for _, sample := range history {
+		if sample.Lag > maximum {
+			maximum = sample.Lag
+		}
+	}
+	levels := []rune("▁▂▃▄▅▆▇█")
+	var trend strings.Builder
+	for range width - len(history) {
+		trend.WriteRune('·')
+	}
+	for _, sample := range history {
+		level := 0
+		if maximum > 0 {
+			level = int(sample.Lag * uint64(len(levels)-1) / maximum)
+		}
+		trend.WriteRune(levels[level])
+	}
+	return trend.String(), history[len(history)-1].Rate
+}
+
+func (m Model) consumerFailures(stream, name string) []appalerts.Record {
+	result := make([]appalerts.Record, 0)
+	for _, record := range m.alerts.records {
+		if record.ResourceKind == "consumer" && record.ResourcePrimary == stream && record.ResourceSecondary == name {
+			result = append(result, record)
+		}
+	}
+	return result
 }
 
 func (m Model) consumerStatusColor(status consumers.Status) lipgloss.Color {
@@ -3398,13 +3591,25 @@ func (m Model) messageSearchView(resultCount int) string {
 func (m Model) watchStatusView() string {
 	switch {
 	case m.watchStarting:
-		return lipgloss.NewStyle().Foreground(m.theme.yellow).Render(m.spinner.View() + " STARTING LIVE")
+		mode := "LIVE"
+		if m.orderedWatch {
+			mode = "ORDERED"
+		}
+		return lipgloss.NewStyle().Foreground(m.theme.yellow).Render(m.spinner.View() + " STARTING " + mode)
 	case m.watching && m.watchPaused:
 		return lipgloss.NewStyle().Foreground(m.theme.yellow).Render(fmt.Sprintf("Ⅱ PAUSED  %d received", m.liveReceived))
 	case m.watching:
-		return lipgloss.NewStyle().Foreground(m.theme.mint).Render(fmt.Sprintf("● LIVE  %d received", m.liveReceived))
+		mode := "LIVE"
+		if m.orderedWatch {
+			mode = "ORDERED"
+		}
+		return lipgloss.NewStyle().Foreground(m.theme.mint).Render(fmt.Sprintf("● %s  %d received", mode, m.liveReceived))
 	default:
-		return lipgloss.NewStyle().Foreground(m.theme.muted).Render("○ HISTORY  •  w watch")
+		mode := "core"
+		if m.orderedWatch {
+			mode = "ordered JS"
+		}
+		return lipgloss.NewStyle().Foreground(m.theme.muted).Render("○ HISTORY  •  w watch  •  o " + mode)
 	}
 }
 
@@ -3420,7 +3625,7 @@ func (m Model) messageListPane(records []messages.Record, width, height int) str
 	for index := start; index < end; index++ {
 		rows = append(rows, m.messageRow(records[index], index == m.messageCursor, width))
 	}
-	hint := lipgloss.NewStyle().Foreground(m.theme.muted).Render("↑/↓ select  •  enter detail  •  w watch  •  space pause")
+	hint := lipgloss.NewStyle().Foreground(m.theme.muted).Render("↑/↓ select  •  enter detail  •  o ordered  •  w watch  •  space pause")
 	return strings.Join([]string{header, columns, strings.Join(rows, "\n"), hint}, "\n")
 }
 

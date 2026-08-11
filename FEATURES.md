@@ -99,7 +99,7 @@ application and adapter boundaries.
 - [x] Mirror/source lag and health.
 - [x] Visualize stream dependency chains.
 
-## Consumer Management and Lag — Partial
+## Consumer Management and Lag
 
 - [x] Account-wide consumer catalog.
 - [x] Pending plus ack-pending lag calculation.
@@ -108,17 +108,17 @@ application and adapter boundaries.
 - [x] Pause and resume.
 - [x] Reset delivery to ack floor plus one.
 - [x] Delete with confirmation.
-- [ ] Create and fully edit consumers.
-- [ ] Push, pull, durable, and ephemeral configuration.
-- [ ] Deliver policy and start sequence/time.
-- [ ] Ack policy, ack wait, max deliver, max ack pending, and backoff.
-- [ ] Filter subject and multiple filter subjects.
-- [ ] Replay policy, rate limit, sample frequency, headers only, and flow control.
-- [ ] Ordered consumer support.
-- [ ] Consumer metadata.
-- [ ] Dead-letter/advisory visibility.
-- [ ] Consumer throughput and lag history.
-- [ ] Inspect redeliveries and delivery failures.
+- [x] Create and fully edit consumers.
+- [x] Push, pull, durable, and ephemeral configuration.
+- [x] Deliver policy and start sequence/time.
+- [x] Ack policy, ack wait, max deliver, max ack pending, and backoff.
+- [x] Filter subject and multiple filter subjects.
+- [x] Replay policy, rate limit, sample frequency, headers only, and flow control.
+- [x] Ordered consumer support.
+- [x] Consumer metadata.
+- [x] Dead-letter/advisory visibility.
+- [x] Consumer throughput and lag history.
+- [x] Inspect redeliveries and delivery failures.
 
 ## Message Monitor and Live Watch — Partial
 

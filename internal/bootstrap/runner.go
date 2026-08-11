@@ -74,10 +74,12 @@ type Session interface {
 	streams.Maintenance
 	consumers.Catalog
 	consumers.Operator
+	consumers.ConfigOperator
 	connections.Source
 	connections.Operator
 	messages.Reader
 	messages.Watcher
+	messages.OrderedWatcher
 	kvstore.BucketCatalog
 	kvstore.BucketCreator
 	kvstore.BucketUpdater
@@ -1102,6 +1104,15 @@ func (r Runner) Run(ctx context.Context, settings config.Settings) error {
 			return tui.WatchStarted(events)
 		}
 	}
+	startOrderedWatch := func(stream string, subjects []string) tea.Cmd {
+		return func() tea.Msg {
+			events, err := sessions.StartOrderedWatch(ctx, stream, subjects)
+			if err != nil {
+				return tui.WatchFailed(err)
+			}
+			return tui.WatchStarted(events)
+		}
+	}
 	stopWatch := func() { sessions.StopWatch() }
 	refresh := func(generation uint64) tea.Cmd {
 		return func() tea.Msg {
@@ -1135,6 +1146,21 @@ func (r Runner) Run(ctx context.Context, settings config.Settings) error {
 				return tui.ConsumerActionFailed(input.Generation, input, err)
 			}
 			return tui.ConsumerActionSucceeded(input.Generation, input)
+		}
+	}
+	consumerConfigure := func(input tui.ConsumerConfigInput) tea.Cmd {
+		return func() tea.Msg {
+			monitor := sessions.Current()
+			if monitor == nil {
+				return tui.ConsumerConfigFailed(input, fmt.Errorf("no active NATS connection"))
+			}
+			actionCtx, cancel := r.withTimeout(ctx, consumerActionTimeout)
+			defer cancel()
+			command := consumers.ConfigCommand{Action: input.Action, Definition: input.Definition}
+			if err := consumers.NewConfigureHandler(monitor).Handle(actionCtx, command); err != nil {
+				return tui.ConsumerConfigFailed(input, err)
+			}
+			return tui.ConsumerConfigSucceeded(input)
 		}
 	}
 	streamAction := func(input tui.StreamActionInput) tea.Cmd {
@@ -1716,8 +1742,10 @@ func (r Runner) Run(ctx context.Context, settings config.Settings) error {
 
 	model := tui.NewModel(settings.Profile, settings.Server, connect, loadMessages).
 		WithMessageWatch(startWatch, stopWatch).
+		WithOrderedMessageWatch(startOrderedWatch).
 		WithRefresh(refresh).
 		WithConsumerActions(consumerAction).
+		WithConsumerConfiguration(consumerConfigure).
 		WithStreamActions(streamAction).
 		WithStreamPurge(streamPurge).
 		WithStreamTransfers(startStreamBackup, startStreamRestore, stopStreamTransfer).
@@ -1846,6 +1874,25 @@ func (s *sessionStore) StartWatch(ctx context.Context, subjects []string) (<-cha
 	watchCtx, cancel := context.WithCancel(ctx)
 	handler := messages.NewWatchHandler(s.monitor)
 	events, err := handler.Handle(watchCtx, subjects)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	s.watchCancel = cancel
+	return events, nil
+}
+
+func (s *sessionStore) StartOrderedWatch(ctx context.Context, stream string, subjects []string) (<-chan messages.Record, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.monitor == nil {
+		return nil, fmt.Errorf("no active NATS connection")
+	}
+	if s.watchCancel != nil {
+		s.watchCancel()
+	}
+	watchCtx, cancel := context.WithCancel(ctx)
+	events, err := s.monitor.WatchOrdered(watchCtx, stream, subjects)
 	if err != nil {
 		cancel()
 		return nil, err

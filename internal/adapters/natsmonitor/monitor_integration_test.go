@@ -843,6 +843,100 @@ func TestConsumerOperationsPauseResumeResetAndDelete(t *testing.T) {
 	}
 }
 
+func TestConsumerConfigurationCreateAndUpdate(t *testing.T) {
+	server := os.Getenv("NATS_TUI_TEST_SERVER")
+	if server == "" {
+		t.Skip("NATS_TUI_TEST_SERVER is not set")
+	}
+	monitor, err := Connect(config.Settings{Server: server})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(monitor.Close)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	suffix := time.Now().UnixNano()
+	streamName := fmt.Sprintf("NATS_TUI_CONFIG_%d", suffix)
+	subject := fmt.Sprintf("nats-tui.config.%d", suffix)
+	if _, err := monitor.jetstream.CreateStream(ctx, jetstream.StreamConfig{Name: streamName, Subjects: []string{subject}, Storage: jetstream.MemoryStorage}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cleanupCancel()
+		_ = monitor.jetstream.DeleteStream(cleanupCtx, streamName)
+	})
+	definition := consumers.DefaultDefinition(streamName, "config-worker")
+	definition.Description = "original"
+	definition.FilterSubjects = []string{subject}
+	definition.MaxDeliver = 3
+	definition.Backoff = []time.Duration{time.Second, 2 * time.Second}
+	definition.Metadata = map[string]string{"team": "platform"}
+	if err := monitor.OperateConsumerConfig(ctx, consumers.ConfigCommand{Action: consumers.ConfigCreate, Definition: definition}); err != nil {
+		t.Fatal(err)
+	}
+	definition.Description = "updated"
+	definition.MaxAckPending = 250
+	if err := monitor.OperateConsumerConfig(ctx, consumers.ConfigCommand{Action: consumers.ConfigUpdate, Definition: definition}); err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := monitor.ListConsumers(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range catalog {
+		if item.Stream == streamName && item.Name == definition.Name {
+			got := item.Definition()
+			if got.Description != "updated" || got.MaxAckPending != 250 || len(got.Backoff) != 2 || got.Metadata["team"] != "platform" {
+				t.Fatalf("definition=%+v", got)
+			}
+			return
+		}
+	}
+	t.Fatal("configured consumer was not listed")
+}
+
+func TestOrderedWatchReturnsJetStreamSequence(t *testing.T) {
+	server := os.Getenv("NATS_TUI_TEST_SERVER")
+	if server == "" {
+		t.Skip("NATS_TUI_TEST_SERVER is not set")
+	}
+	monitor, err := Connect(config.Settings{Server: server})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(monitor.Close)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	suffix := time.Now().UnixNano()
+	streamName := fmt.Sprintf("NATS_TUI_ORDERED_%d", suffix)
+	subject := fmt.Sprintf("nats-tui.ordered.%d", suffix)
+	if _, err := monitor.jetstream.CreateStream(ctx, jetstream.StreamConfig{Name: streamName, Subjects: []string{subject}, Storage: jetstream.MemoryStorage}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cleanupCancel()
+		_ = monitor.jetstream.DeleteStream(cleanupCtx, streamName)
+	})
+	events, err := monitor.WatchOrdered(ctx, streamName, []string{subject})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ack, err := monitor.jetstream.Publish(ctx, subject, []byte(`{"ordered":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case record := <-events:
+		if record.Sequence != ack.Sequence || record.Subject != subject || string(record.Payload) != `{"ordered":true}` {
+			t.Fatalf("record=%+v ack=%+v", record, ack)
+		}
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for ordered message")
+	}
+}
+
 func TestStreamOperationsCreateAdvancedUpdateAndDelete(t *testing.T) {
 	server := os.Getenv("NATS_TUI_TEST_SERVER")
 	if server == "" {

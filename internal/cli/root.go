@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/clcsolutions/nats-tui/internal/app/consumers"
 	"github.com/clcsolutions/nats-tui/internal/app/kvstore"
 	"github.com/clcsolutions/nats-tui/internal/app/objectstore"
 	"github.com/clcsolutions/nats-tui/internal/app/streams"
@@ -99,6 +100,12 @@ type StreamManager interface {
 	RestoreStream(context.Context, config.Settings, streams.RestoreFile, streams.TransferProgressFunc) (streams.RestoreResult, error)
 }
 
+type ConsumerManager interface {
+	ListConsumerCatalog(context.Context, config.Settings) ([]consumers.Summary, error)
+	OperateConsumerConfig(context.Context, config.Settings, consumers.ConfigCommand) error
+	OperateConsumer(context.Context, config.Settings, consumers.Command) error
+}
+
 type CorePublisher interface {
 	PublishCoreMessage(context.Context, config.Settings, domainrequestreply.Message) error
 }
@@ -163,6 +170,7 @@ type Dependencies struct {
 	ObjectBucketUpdater    ObjectBucketUpdater
 	ObjectBucketDeleter    ObjectBucketDeleter
 	Streams                StreamManager
+	Consumers              ConsumerManager
 	CorePublisher          CorePublisher
 	CoreRequester          CoreRequester
 	RequestHistory         RequestHistory
@@ -237,6 +245,7 @@ func NewRoot(deps Dependencies) *cobra.Command {
 		bucketCreator: deps.ObjectBucketCreator, bucketUpdater: deps.ObjectBucketUpdater, bucketDeleter: deps.ObjectBucketDeleter,
 	}, clock))
 	root.AddCommand(newStreamCommand(values, deps.Streams, clock))
+	root.AddCommand(newConsumerCommand(values, deps.Consumers))
 	root.AddCommand(newPublishCommand(values, deps.CorePublisher, files))
 	root.AddCommand(newRequestCommand(values, requestServices{requester: deps.CoreRequester, history: deps.RequestHistory, templates: deps.RequestTemplates}, files))
 	root.AddCommand(newTopologyCommand(values, deps.TopologyReader, deps.TopologyOperator))

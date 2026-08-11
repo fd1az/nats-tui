@@ -29,6 +29,13 @@ type Summary struct {
 	Push            bool
 	CreatedAt       time.Time
 	LastActiveAt    time.Time
+	Config          Definition
+}
+
+func (s Summary) Definition() Definition {
+	definition := s.Config.Clone()
+	definition.Stream, definition.Name = s.Stream, s.Name
+	return definition
 }
 
 func (s Summary) Lag() uint64 {

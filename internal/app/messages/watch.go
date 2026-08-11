@@ -6,6 +6,10 @@ type Watcher interface {
 	Watch(context.Context, []string) (<-chan Record, error)
 }
 
+type OrderedWatcher interface {
+	WatchOrdered(context.Context, string, []string) (<-chan Record, error)
+}
+
 type WatchHandler struct {
 	watcher Watcher
 }

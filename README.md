@@ -46,15 +46,39 @@ headers, and sequences. Multiple terms are combined, Escape leaves the current
 filter applied, and Ctrl+U clears it. Press w to start or stop Live Watch for the
 selected stream and Space to pause or resume the UI feed. Live events are
 coalesced into short batches and retained in a bounded 2,000-message buffer.
+Press o before starting a watch to use a gap-detecting ordered JetStream
+consumer instead of a Core NATS subscription; ordered mode includes the real
+stream sequence and automatically recovers its ephemeral consumer on gaps.
 
 The Consumers workspace provides an account-wide lag dashboard. It combines
 undelivered and unacknowledged work into lag, shows active, idle, lagging, and
 paused states, keeps selection inside a responsive viewport, and displays a
 synchronized detail pane on wide terminals. Enter opens the compact full detail.
+Press n to create a consumer and e to edit one. The centered responsive form
+covers pull/push and durable/ephemeral modes, delivery and acknowledgement
+policies, start sequence/time, filters, retry backoff, pull limits, flow control,
+heartbeats, storage, and metadata. Each field includes contextual guidance and
+updates preserve the complete server configuration.
 Press p to pause or resume the selected consumer. Reset with x and delete with d;
 both require an explicit y confirmation and can be cancelled with n or Escape.
 Reset returns delivery to `ack_floor + 1`. Mutations have a five-second timeout,
-ignore responses from old connections, and force an immediate refresh.
+ignore responses from old connections, and force an immediate refresh. The
+detail pane keeps a bounded lag sparkline, calculates delivery throughput from
+server observations, and surfaces recent max-delivery/termination advisories.
+
+Consumer management is also scriptable. Omitted edit flags preserve their
+existing values:
+
+    nats-tui consumer list --output json
+    nats-tui consumer create EVENTS worker \
+      --filter 'events.us.*' --filter 'events.eu.*' \
+      --ack-policy explicit --ack-wait 30s --max-deliver 5 \
+      --backoff 1s,5s,30s --metadata team=payments
+    nats-tui consumer create EVENTS push-worker \
+      --deliver deliver.events --deliver-group workers \
+      --flow-control --heartbeat 5s
+    nats-tui consumer edit EVENTS worker --max-ack-pending 500
+    nats-tui consumer delete EVENTS worker --yes
 
 Dashboard, stream, and consumer state refresh automatically every three seconds.
 Press r to refresh immediately. Refresh calls have a three-second timeout and do
