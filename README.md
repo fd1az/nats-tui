@@ -29,6 +29,21 @@ The startup flow is:
 3. Visible connection/loading state.
 4. Navigable workspace.
 
+Saved connection profiles appear on the startup screen ordered by recent use;
+direct URL entry without authentication remains available with `n`. Profiles
+support multiple failover URLs and no authentication, token, credentials-file,
+or username/password authentication. Local state is written atomically with
+mode `0600`, while list and export output never include secrets:
+
+    nats-tui profile save local-events --server-url nats://127.0.0.1:4222
+    nats-tui profile save production \
+      --server-url nats://a:4222,nats://b:4222 \
+      --auth-user ops --auth-password "$NATS_PASSWORD"
+    nats-tui profile list
+    nats-tui profile test production
+    nats-tui --profile production stream list
+    nats-tui profile export > profiles.sanitized.json
+
 Use arrow keys, h/l, tab, `1-9`, `0`, `A` (accounts), or `!` (alerts) to move between sections. Press c to return to
 the connection screen, ? for help, and q to quit from the workspace.
 

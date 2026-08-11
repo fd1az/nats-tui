@@ -134,6 +134,12 @@ func ConnectWithClock(settings config.Settings, clock Clock) (*Monitor, error) {
 	if settings.Token != "" {
 		options = append(options, nats.Token(settings.Token))
 	}
+	if settings.Username != "" || settings.Password != "" {
+		if settings.Username == "" || settings.Password == "" {
+			return nil, errors.New("NATS username and password must be configured together")
+		}
+		options = append(options, nats.UserInfo(settings.Username, settings.Password))
+	}
 
 	connection, err := nats.Connect(settings.Server, options...)
 	if err != nil {

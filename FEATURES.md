@@ -40,17 +40,17 @@ application and adapter boundaries.
 - [x] Connect without authentication.
 - [x] Token authentication.
 - [x] Credentials-file authentication.
-- [ ] Persistent named profiles.
-- [ ] Startup profile selector and recent connections.
-- [ ] Multiple server URLs with failover.
-- [ ] Username/password authentication.
+- [x] Persistent named profiles.
+- [x] Startup profile selector and recent connections.
+- [x] Multiple server URLs with failover.
+- [x] Username/password authentication.
 - [ ] NKey seed authentication.
 - [ ] JWT authentication.
 - [ ] TLS CA, client certificate, client key, server name, and verification controls.
-- [ ] Connection test with actionable diagnostics.
+- [x] Connection test with actionable diagnostics.
 - [ ] Secure handling and redaction of secrets.
 - [ ] Import profiles from NATS CLI contexts.
-- [ ] Export sanitized profile configuration.
+- [x] Export sanitized profile configuration.
 
 ## Dashboard and Real-Time Metrics — Partial
 

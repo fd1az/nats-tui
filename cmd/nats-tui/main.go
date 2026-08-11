@@ -44,6 +44,7 @@ func main() {
 		Streams:                runner,
 		Messages:               runner,
 		Subjects:               runner,
+		Profiles:               runner,
 		Consumers:              runner,
 		CorePublisher:          runner,
 		CoreRequester:          runner,

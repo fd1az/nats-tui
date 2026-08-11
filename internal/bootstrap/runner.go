@@ -58,6 +58,7 @@ type Runner struct {
 	bookmarkRepository appbookmarks.Repository
 	bookmarkStateMu    *sync.Mutex
 	bookmarkStates     map[string]*localstate.BookmarkRepository
+	profileRepository  connections.ProfileRepository
 	readPayload        func(string) ([]byte, error)
 	authoritySigner    func([]byte) (operator.AuthoritySigner, error)
 	accountSigner      func([]byte) (operator.AuthoritySigner, error)
@@ -175,6 +176,34 @@ func defaultBookmarkRepository(profile string) *localstate.BookmarkRepository {
 	}
 	profile = localStateProfile(profile)
 	return localstate.NewBookmarkRepository(localstate.OSStateFile{Path: filepath.Join(directory, "nats-tui", "bookmarks-"+profile+".json")})
+}
+
+func defaultProfileRepository() *localstate.ProfileRepository {
+	directory, err := os.UserConfigDir()
+	if err != nil {
+		if home, homeErr := os.UserHomeDir(); homeErr == nil {
+			directory = filepath.Join(home, ".config")
+		} else {
+			directory = "."
+		}
+	}
+	return localstate.NewProfileRepository(localstate.OSStateFile{Path: filepath.Join(directory, "nats-tui", "profiles.json")})
+}
+
+func (r Runner) profileService() connections.ProfileService {
+	repository := r.profileRepository
+	if repository == nil {
+		repository = defaultProfileRepository()
+	}
+	return connections.NewProfileService(repository, r.clock)
+}
+
+func (r Runner) WithProfileDependencies(repository connections.ProfileRepository, clock requestreply.Clock) Runner {
+	if repository == nil || clock == nil {
+		panic("profile dependencies cannot be nil")
+	}
+	r.profileRepository, r.clock = repository, clock
+	return r
 }
 
 func (r Runner) WithAuthorityDependencies(operatorSigner, accountSigner func([]byte) (operator.AuthoritySigner, error), store func(string) (operator.AuthorityRepository, error)) Runner {
@@ -855,14 +884,21 @@ func (r Runner) Run(ctx context.Context, settings config.Settings) error {
 
 	connect := func(input tui.ConnectionInput) tea.Cmd {
 		return func() tea.Msg {
-			profile, err := connection.NewProfile(input.Profile, input.Server)
+			connectionSettings := settings
+			var profile connection.Profile
+			var err error
+			if input.UseProfile {
+				profile, err = r.profileService().Find(ctx, input.Profile)
+				if err == nil {
+					connectionSettings = settingsFromProfile(profile)
+				}
+			} else {
+				profile, err = connection.NewDirectProfile(input.Profile, input.Server)
+				connectionSettings.Profile, connectionSettings.Server = profile.Name(), profile.Server()
+			}
 			if err != nil {
 				return tui.ConnectionFailed(err)
 			}
-
-			connectionSettings := settings
-			connectionSettings.Profile = input.Profile
-			connectionSettings.Server = input.Server
 			monitor, err := r.connector()(connectionSettings)
 			if err != nil {
 				return tui.ConnectionFailed(err)
@@ -876,7 +912,19 @@ func (r Runner) Run(ctx context.Context, settings config.Settings) error {
 
 			sessions.Replace(monitor)
 			activeSettings = connectionSettings
+			if input.UseProfile {
+				_ = r.profileService().MarkUsed(ctx, profile.Name())
+			}
 			return tui.ConnectedWithObjects(profile.Name(), state.snapshot, state.streams, state.consumers, state.buckets, state.objects)
+		}
+	}
+	loadProfiles := func() tea.Cmd {
+		return func() tea.Msg {
+			items, err := r.profileService().List(ctx)
+			if err != nil {
+				return tui.ConnectionProfilesFailed(err)
+			}
+			return tui.ConnectionProfilesLoaded(items)
 		}
 	}
 	loadMessages := func(stream string) tea.Cmd {
@@ -1863,6 +1911,7 @@ func (r Runner) Run(ctx context.Context, settings config.Settings) error {
 		}).
 		WithTopology(tui.TopologyServices{Load: loadTopology, Operate: operateTopology})
 	model = model.WithConnections(tui.ConnectionServices{Load: loadConnections, Close: closeConnection})
+	model = model.WithConnectionProfiles(tui.ProfileServices{Load: loadProfiles})
 	model = model.WithOperator(tui.OperatorServices{Load: loadOperator, CreateAccount: createOperatorAccount, CreateUser: createOperatorUser, UpdateAccount: updateOperatorAccount, DeleteAccount: deleteOperatorAccount, UpdateUser: updateOperatorUser, RevokeUser: revokeOperatorUser, DeleteUser: deleteOperatorUser, AddSigningKey: addOperatorSigningKey})
 	model = model.WithAlerts(tui.AlertServices{Load: loadAlerts, Watch: watchAlerts, Stop: func() {
 		if alertCancel != nil {

@@ -17,6 +17,8 @@ type Settings struct {
 	MonitorURL   string
 	Credentials  string
 	Token        string
+	Username     string
+	Password     string
 	AuthorityDir string
 	OperatorSeed string
 	Refresh      time.Duration
@@ -56,6 +58,8 @@ func Load(v *viper.Viper) Settings {
 		MonitorURL:   v.GetString("monitor-url"),
 		Credentials:  v.GetString("credentials"),
 		Token:        v.GetString("token"),
+		Username:     v.GetString("username"),
+		Password:     v.GetString("password"),
 		AuthorityDir: v.GetString("authority-dir"),
 		OperatorSeed: v.GetString("authority-operator-seed"),
 		Refresh:      v.GetDuration("refresh"),

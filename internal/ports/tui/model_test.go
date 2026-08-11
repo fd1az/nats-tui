@@ -49,6 +49,24 @@ func TestAppStartsWithPresentationThenRequestsConnection(t *testing.T) {
 	}
 }
 
+func TestConnectionScreenSelectsRecentProfileWithoutExposingSecrets(t *testing.T) {
+	var connected ConnectionInput
+	model := newTestModel(func(input ConnectionInput) tea.Cmd {
+		connected = input
+		return func() tea.Msg { return ConnectionFailed(errors.New("stop")) }
+	})
+	updated, _ := model.Update(ConnectionProfilesLoaded([]appconnections.ProfileSummary{{Name: "prod", Servers: []string{"nats://a:4222", "nats://b:4222"}, Auth: "user-password", Username: "ops"}}))
+	selected, _ := updated.(Model).Update(welcomeDoneMsg{})
+	view := selected.(Model).View()
+	if !strings.Contains(view, "prod") || !strings.Contains(view, "user-password") || strings.Contains(view, "secret") {
+		t.Fatalf("view=%s", view)
+	}
+	_, command := selected.(Model).Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if command == nil || !connected.UseProfile || connected.Profile != "prod" {
+		t.Fatalf("input=%+v", connected)
+	}
+}
+
 func TestConnectionsWorkspaceLoadsFiltersDetailsJumpsAndConfirmsClose(t *testing.T) {
 	t.Parallel()
 	snapshot := appconnections.Snapshot{ObservedAt: time.Now(), Connections: []appconnections.Connection{{ServerID: "A", ServerName: "nats-a", CID: 42, Name: "worker", User: "svc", Lang: "go", PendingBytes: 2 << 20, Subscriptions: []appconnections.Subscription{{Subject: "orders.*", Queue: "workers"}}}}}

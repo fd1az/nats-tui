@@ -17,6 +17,7 @@ import (
 	appalerts "github.com/clcsolutions/nats-tui/internal/app/alerts"
 	appbookmarks "github.com/clcsolutions/nats-tui/internal/app/bookmarks"
 	appcommandbar "github.com/clcsolutions/nats-tui/internal/app/commandbar"
+	appconnections "github.com/clcsolutions/nats-tui/internal/app/connections"
 	"github.com/clcsolutions/nats-tui/internal/app/consumers"
 	"github.com/clcsolutions/nats-tui/internal/app/dashboard"
 	"github.com/clcsolutions/nats-tui/internal/app/kvstore"
@@ -48,8 +49,9 @@ const (
 )
 
 type ConnectionInput struct {
-	Profile string
-	Server  string
+	Profile    string
+	Server     string
+	UseProfile bool
 }
 
 type ConnectFunc func(ConnectionInput) tea.Cmd
@@ -226,11 +228,16 @@ type Model struct {
 	alertServices                AlertServices
 	commandBarServices           CommandBarServices
 	bookmarkServices             BookmarkServices
+	profileServices              ProfileServices
 	operator                     operatorState
 	alerts                       alertState
 	commandBar                   commandBarState
 	bookmarks                    bookmarkState
 	serverInput                  textinput.Model
+	connectionProfiles           []appconnections.ProfileSummary
+	connectionProfileCursor      int
+	connectionProfilesLoading    bool
+	useSelectedProfile           bool
 	spinner                      spinner.Model
 	err                          error
 	width                        int
@@ -968,10 +975,15 @@ func ObjectBucketDeleteFailed(input ObjectBucketDeleteInput, err error) tea.Msg 
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(
+	commands := []tea.Cmd{
 		m.runtime.Tick(900*time.Millisecond, func(time.Time) tea.Msg { return welcomeDoneMsg{} }),
 		textinput.Blink,
-	)
+	}
+	if m.profileServices.Load != nil {
+		m.connectionProfilesLoading = true
+		commands = append(commands, m.profileServices.Load())
+	}
+	return tea.Batch(commands...)
 }
 
 func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
@@ -1048,6 +1060,17 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case connectionFailedMsg:
 		m.err = msg.err
 		return m.showConnection()
+	case connectionProfilesLoadedMsg:
+		m.connectionProfilesLoading = false
+		m.connectionProfiles = append([]appconnections.ProfileSummary(nil), msg.items...)
+		if len(m.connectionProfiles) > 0 && !m.useSelectedProfile {
+			m.selectConnectionProfile(0)
+		}
+		return m, nil
+	case connectionProfilesFailedMsg:
+		m.connectionProfilesLoading = false
+		m.err = msg.err
+		return m, nil
 	case messagesLoadedMsg:
 		if m.watching && m.stopWatch != nil {
 			m.stopWatch()
@@ -1988,8 +2011,27 @@ func (m Model) updateConnection(message tea.Msg) (tea.Model, tea.Cmd) {
 		switch key.String() {
 		case "enter":
 			return m.startConnection()
+		case "up", "k":
+			if len(m.connectionProfiles) > 0 {
+				m.selectConnectionProfile(max(0, m.connectionProfileCursor-1))
+			}
+			return m, nil
+		case "down", "j":
+			if len(m.connectionProfiles) > 0 {
+				m.selectConnectionProfile(min(len(m.connectionProfiles)-1, m.connectionProfileCursor+1))
+			}
+			return m, nil
+		case "n":
+			m.useSelectedProfile = false
+			m.profile = "local"
+			m.serverInput.SetValue("nats://127.0.0.1:4222")
+			m.serverInput.CursorEnd()
+			return m, nil
 		case "esc":
 			return m, tea.Quit
+		}
+		if key.Type == tea.KeyRunes || key.Type == tea.KeyBackspace || key.Type == tea.KeyDelete {
+			m.useSelectedProfile = false
 		}
 	}
 
@@ -3200,7 +3242,7 @@ func (m Model) startConnection() (tea.Model, tea.Cmd) {
 	}
 
 	command := m.withMinimumDuration(
-		m.connect(ConnectionInput{Profile: m.profile, Server: server}),
+		m.connect(ConnectionInput{Profile: m.profile, Server: server, UseProfile: m.useSelectedProfile}),
 		minimumConnectionDisplay,
 	)
 	m.err = nil
@@ -3284,18 +3326,22 @@ func (m Model) connectionView(width, height int) string {
 		Render("Connect to NATS")
 	subtitle := lipgloss.NewStyle().
 		Foreground(m.theme.secondary).
-		Render("Paste a server URL. Authentication is optional.")
+		Render("Choose a saved profile or paste a server URL. Authentication is optional.")
 	label := lipgloss.NewStyle().
 		Foreground(m.theme.muted).
 		Render("Server URL")
+	authLabel := "● No authentication · direct connection"
+	if m.useSelectedProfile && len(m.connectionProfiles) > 0 {
+		authLabel = "● " + string(m.connectionProfiles[m.connectionProfileCursor].Auth) + " authentication"
+	}
 	auth := lipgloss.NewStyle().
 		Foreground(m.theme.mint).
-		Render("● No authentication")
+		Render(authLabel)
 	actions := lipgloss.NewStyle().
 		Foreground(m.theme.muted).
-		Render("enter connect   esc quit")
+		Render("↑/↓ choose profile   n new URL   enter connect   esc quit")
 
-	parts := []string{title, subtitle, "", label, m.serverInputView(), "", auth}
+	parts := []string{title, subtitle, "", m.connectionProfilesView(cardWidth - 8), "", label, m.serverInputView(), "", auth}
 	if m.err != nil {
 		parts = append(parts, "", lipgloss.NewStyle().Foreground(m.theme.red).Render("Connection failed: "+m.err.Error()))
 	}

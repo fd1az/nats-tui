@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/clcsolutions/nats-tui/internal/app/connections"
 	"github.com/clcsolutions/nats-tui/internal/app/consumers"
 	"github.com/clcsolutions/nats-tui/internal/app/kvstore"
 	"github.com/clcsolutions/nats-tui/internal/app/messages"
@@ -121,6 +122,14 @@ type SubjectExplorer interface {
 	ExploreSubjects(context.Context, config.Settings) ([]subjects.Node, error)
 }
 
+type ProfileManager interface {
+	SaveConnectionProfile(context.Context, connections.ProfileInput) error
+	ListConnectionProfiles(context.Context) ([]connections.ProfileSummary, error)
+	DeleteConnectionProfile(context.Context, string) error
+	TestConnectionProfile(context.Context, string) (connections.ProfileTestResult, error)
+	ResolveConnectionProfile(context.Context, string, config.Settings) (config.Settings, error)
+}
+
 type CoreRequester interface {
 	SendCoreRequest(context.Context, config.Settings, domainrequestreply.Request) (domainrequestreply.Exchange, error)
 }
@@ -185,6 +194,7 @@ type Dependencies struct {
 	CorePublisher          CorePublisher
 	Messages               MessageManager
 	Subjects               SubjectExplorer
+	Profiles               ProfileManager
 	CoreRequester          CoreRequester
 	RequestHistory         RequestHistory
 	RequestTemplates       RequestTemplates
@@ -214,8 +224,24 @@ func NewRoot(deps Dependencies) *cobra.Command {
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		PersistentPreRunE: func(_ *cobra.Command, _ []string) error {
-			return config.Configure(values, configFile)
+		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+			if err := config.Configure(values, configFile); err != nil {
+				return err
+			}
+			profileFlag := cmd.Flag("profile")
+			serverFlag := cmd.Flag("server")
+			isProfileCommand := cmd.Name() == "profile" || cmd.Parent() != nil && cmd.Parent().Name() == "profile"
+			if deps.Profiles == nil || isProfileCommand || profileFlag == nil || !profileFlag.Changed || serverFlag != nil && serverFlag.Changed {
+				return nil
+			}
+			resolved, err := deps.Profiles.ResolveConnectionProfile(cmd.Context(), values.GetString("profile"), config.Load(values))
+			if err != nil {
+				return err
+			}
+			for key, value := range map[string]any{"profile": resolved.Profile, "server": resolved.Server, "monitor-url": resolved.MonitorURL, "credentials": resolved.Credentials, "token": resolved.Token, "username": resolved.Username, "password": resolved.Password, "refresh": resolved.Refresh} {
+				values.Set(key, value)
+			}
+			return nil
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if deps.Runner == nil {
@@ -232,11 +258,13 @@ func NewRoot(deps Dependencies) *cobra.Command {
 	flags.String("monitor-url", "", "optional NATS HTTP monitoring URL (for example http://127.0.0.1:8222)")
 	flags.String("credentials", "", "NATS credentials file")
 	flags.String("token", "", "NATS authentication token")
+	flags.String("username", "", "NATS authentication username")
+	flags.String("password", "", "NATS authentication password")
 	flags.String("authority-dir", "", "private directory for locally managed account and user credentials")
 	flags.String("authority-operator-seed", "", "operator seed file enabling account mutations")
 	flags.Duration("refresh", 2*time.Second, "dashboard refresh interval")
 
-	for _, name := range []string{"profile", "server", "monitor-url", "credentials", "token", "authority-dir", "authority-operator-seed", "refresh"} {
+	for _, name := range []string{"profile", "server", "monitor-url", "credentials", "token", "username", "password", "authority-dir", "authority-operator-seed", "refresh"} {
 		if err := values.BindPFlag(name, flags.Lookup(name)); err != nil {
 			panic(fmt.Sprintf("bind flag %s: %v", name, err))
 		}
@@ -262,6 +290,7 @@ func NewRoot(deps Dependencies) *cobra.Command {
 	root.AddCommand(newPublishCommand(values, deps.CorePublisher, files))
 	root.AddCommand(newMessageCommand(values, deps.Messages, deps.Streams, deps.CorePublisher))
 	root.AddCommand(newSubjectCommand(values, deps.Subjects, deps.CorePublisher, deps.CoreRequester, files))
+	root.AddCommand(newProfileCommand(deps.Profiles))
 	root.AddCommand(newRequestCommand(values, requestServices{requester: deps.CoreRequester, history: deps.RequestHistory, templates: deps.RequestTemplates}, files))
 	root.AddCommand(newTopologyCommand(values, deps.TopologyReader, deps.TopologyOperator))
 	root.AddCommand(newConnectionsCommand(values, deps.ConnectionReader, deps.ConnectionCloser))
