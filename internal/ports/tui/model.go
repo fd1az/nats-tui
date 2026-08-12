@@ -238,6 +238,7 @@ type Model struct {
 	connectionProfileCursor      int
 	connectionProfilesLoading    bool
 	useSelectedProfile           bool
+	connectionInputEdited        bool
 	spinner                      spinner.Model
 	err                          error
 	width                        int
@@ -1063,7 +1064,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case connectionProfilesLoadedMsg:
 		m.connectionProfilesLoading = false
 		m.connectionProfiles = append([]appconnections.ProfileSummary(nil), msg.items...)
-		if len(m.connectionProfiles) > 0 && !m.useSelectedProfile {
+		if len(m.connectionProfiles) > 0 && !m.useSelectedProfile && !m.connectionInputEdited {
 			m.selectConnectionProfile(0)
 		}
 		return m, nil
@@ -2023,6 +2024,7 @@ func (m Model) updateConnection(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "n":
 			m.useSelectedProfile = false
+			m.connectionInputEdited = true
 			m.profile = "local"
 			m.serverInput.SetValue("nats://127.0.0.1:4222")
 			m.serverInput.CursorEnd()
@@ -2032,6 +2034,7 @@ func (m Model) updateConnection(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if key.Type == tea.KeyRunes || key.Type == tea.KeyBackspace || key.Type == tea.KeyDelete {
 			m.useSelectedProfile = false
+			m.connectionInputEdited = true
 		}
 	}
 

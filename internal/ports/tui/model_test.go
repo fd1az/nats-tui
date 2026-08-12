@@ -67,6 +67,18 @@ func TestConnectionScreenSelectsRecentProfileWithoutExposingSecrets(t *testing.T
 	}
 }
 
+func TestLateProfileLoadDoesNotOverwriteDirectURLBeingEdited(t *testing.T) {
+	model := newTestModel(nil)
+	model.screen = screenConnection
+	model.connectionInputEdited = true
+	model.serverInput.SetValue("nats://custom:4222")
+	updated, _ := model.Update(ConnectionProfilesLoaded([]appconnections.ProfileSummary{{Name: "prod", Servers: []string{"nats://prod:4222"}, Auth: "none"}}))
+	got := updated.(Model)
+	if got.serverInput.Value() != "nats://custom:4222" || got.useSelectedProfile {
+		t.Fatalf("server=%q selected=%v", got.serverInput.Value(), got.useSelectedProfile)
+	}
+}
+
 func TestConnectionsWorkspaceLoadsFiltersDetailsJumpsAndConfirmsClose(t *testing.T) {
 	t.Parallel()
 	snapshot := appconnections.Snapshot{ObservedAt: time.Now(), Connections: []appconnections.Connection{{ServerID: "A", ServerName: "nats-a", CID: 42, Name: "worker", User: "svc", Lang: "go", PendingBytes: 2 << 20, Subscriptions: []appconnections.Subscription{{Subject: "orders.*", Queue: "workers"}}}}}

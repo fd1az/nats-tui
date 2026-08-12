@@ -32,6 +32,7 @@ func (m *Model) selectConnectionProfile(cursor int) {
 	m.serverInput.SetValue(strings.Join(selected.Servers, ","))
 	m.serverInput.CursorEnd()
 	m.useSelectedProfile = true
+	m.connectionInputEdited = false
 }
 
 func (m Model) connectionProfilesView(width int) string {
@@ -56,7 +57,14 @@ func (m Model) connectionProfilesView(width int) string {
 		if len(item.Servers) > 0 {
 			server = item.Servers[0]
 		}
-		line := fmt.Sprintf("%s%-16s %-18s %s", marker, truncate(item.Name, 16), truncate(server, max(width-42, 12)), item.Auth)
+		security := string(item.Auth)
+		if item.TLS {
+			security += "+tls"
+		}
+		if item.InsecureTLS {
+			security += "!"
+		}
+		line := fmt.Sprintf("%s%-16s %-18s %s", marker, truncate(item.Name, 16), truncate(server, max(width-42, 12)), security)
 		rows = append(rows, lipgloss.NewStyle().Foreground(color).Bold(m.useSelectedProfile && i == m.connectionProfileCursor).Render(line))
 	}
 	return strings.Join(rows, "\n")

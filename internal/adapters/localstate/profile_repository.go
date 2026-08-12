@@ -29,15 +29,23 @@ type profileState struct {
 	Profiles []profileDTO `json:"profiles,omitempty"`
 }
 type profileDTO struct {
-	Name        string    `json:"name"`
-	Servers     []string  `json:"servers"`
-	MonitorURL  string    `json:"monitor_url,omitempty"`
-	Auth        string    `json:"auth"`
-	Token       string    `json:"token,omitempty"`
-	Credentials string    `json:"credentials,omitempty"`
-	Username    string    `json:"username,omitempty"`
-	Password    string    `json:"password,omitempty"`
-	LastUsedAt  time.Time `json:"last_used_at,omitempty"`
+	Name          string    `json:"name"`
+	Servers       []string  `json:"servers"`
+	MonitorURL    string    `json:"monitor_url,omitempty"`
+	Auth          string    `json:"auth"`
+	Token         string    `json:"token,omitempty"`
+	Credentials   string    `json:"credentials,omitempty"`
+	Username      string    `json:"username,omitempty"`
+	Password      string    `json:"password,omitempty"`
+	NKeySeed      string    `json:"nkey_seed,omitempty"`
+	UserJWT       string    `json:"user_jwt,omitempty"`
+	UserSeed      string    `json:"user_seed,omitempty"`
+	TLSCA         string    `json:"tls_ca,omitempty"`
+	TLSCert       string    `json:"tls_cert,omitempty"`
+	TLSKey        string    `json:"tls_key,omitempty"`
+	TLSServerName string    `json:"tls_server_name,omitempty"`
+	TLSInsecure   bool      `json:"tls_insecure,omitempty"`
+	LastUsedAt    time.Time `json:"last_used_at,omitempty"`
 }
 
 func (r *ProfileRepository) Save(_ context.Context, profile domain.Profile) error {
@@ -133,7 +141,8 @@ func (r *ProfileRepository) save(state profileState) error {
 }
 func profileToDTO(profile domain.Profile) profileDTO {
 	auth := profile.Authentication()
-	return profileDTO{Name: profile.Name(), Servers: profile.Servers(), MonitorURL: profile.MonitorURL(), Auth: string(auth.Kind()), Token: auth.Token(), Credentials: auth.Credentials(), Username: auth.Username(), Password: auth.Password(), LastUsedAt: profile.LastUsedAt()}
+	tlsConfig := profile.TLS()
+	return profileDTO{Name: profile.Name(), Servers: profile.Servers(), MonitorURL: profile.MonitorURL(), Auth: string(auth.Kind()), Token: auth.Token(), Credentials: auth.Credentials(), Username: auth.Username(), Password: auth.Password(), NKeySeed: auth.NKeySeed(), UserJWT: auth.UserJWT(), UserSeed: auth.UserSeed(), TLSCA: tlsConfig.CAFile(), TLSCert: tlsConfig.CertificateFile(), TLSKey: tlsConfig.KeyFile(), TLSServerName: tlsConfig.ServerName(), TLSInsecure: tlsConfig.Insecure(), LastUsedAt: profile.LastUsedAt()}
 }
 func (d profileDTO) profile() (domain.Profile, error) {
 	var auth domain.Authentication
@@ -147,11 +156,19 @@ func (d profileDTO) profile() (domain.Profile, error) {
 		auth, err = domain.CredentialsAuthentication(d.Credentials)
 	case domain.AuthUserPass:
 		auth, err = domain.UserPasswordAuthentication(d.Username, d.Password)
+	case domain.AuthNKey:
+		auth, err = domain.NKeyAuthentication(d.NKeySeed)
+	case domain.AuthJWT:
+		auth, err = domain.JWTAuthentication(d.UserJWT, d.UserSeed)
 	default:
 		err = domain.ErrInvalidCredentials
 	}
 	if err != nil {
 		return domain.Profile{}, err
 	}
-	return domain.RestoreProfile(d.Name, d.Servers, d.MonitorURL, auth, d.LastUsedAt)
+	tlsConfig, err := domain.NewTLS(d.TLSCA, d.TLSCert, d.TLSKey, d.TLSServerName, d.TLSInsecure)
+	if err != nil {
+		return domain.Profile{}, err
+	}
+	return domain.RestoreProfile(d.Name, d.Servers, d.MonitorURL, auth, d.LastUsedAt, tlsConfig)
 }

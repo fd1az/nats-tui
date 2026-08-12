@@ -128,6 +128,7 @@ type ProfileManager interface {
 	DeleteConnectionProfile(context.Context, string) error
 	TestConnectionProfile(context.Context, string) (connections.ProfileTestResult, error)
 	ResolveConnectionProfile(context.Context, string, config.Settings) (config.Settings, error)
+	ImportNATSContexts(context.Context, string, bool) (connections.ImportResult, error)
 }
 
 type CoreRequester interface {
@@ -238,7 +239,7 @@ func NewRoot(deps Dependencies) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			for key, value := range map[string]any{"profile": resolved.Profile, "server": resolved.Server, "monitor-url": resolved.MonitorURL, "credentials": resolved.Credentials, "token": resolved.Token, "username": resolved.Username, "password": resolved.Password, "refresh": resolved.Refresh} {
+			for key, value := range map[string]any{"profile": resolved.Profile, "server": resolved.Server, "monitor-url": resolved.MonitorURL, "credentials": resolved.Credentials, "token": resolved.Token, "username": resolved.Username, "password": resolved.Password, "nkey-seed": resolved.NKeySeed, "user-jwt": resolved.UserJWT, "user-seed": resolved.UserSeed, "tls-ca": resolved.TLSCA, "tls-cert": resolved.TLSCert, "tls-key": resolved.TLSKey, "tls-server-name": resolved.TLSServerName, "tls-insecure": resolved.TLSInsecure, "refresh": resolved.Refresh} {
 				values.Set(key, value)
 			}
 			return nil
@@ -260,11 +261,19 @@ func NewRoot(deps Dependencies) *cobra.Command {
 	flags.String("token", "", "NATS authentication token")
 	flags.String("username", "", "NATS authentication username")
 	flags.String("password", "", "NATS authentication password")
+	flags.String("nkey-seed", "", "NKey seed file")
+	flags.String("user-jwt", "", "user JWT file")
+	flags.String("user-seed", "", "user NKey seed file")
+	flags.String("tls-ca", "", "TLS CA certificate file")
+	flags.String("tls-cert", "", "TLS client certificate file")
+	flags.String("tls-key", "", "TLS client private key file")
+	flags.String("tls-server-name", "", "TLS server name override")
+	flags.Bool("tls-insecure", false, "skip TLS certificate verification (unsafe)")
 	flags.String("authority-dir", "", "private directory for locally managed account and user credentials")
 	flags.String("authority-operator-seed", "", "operator seed file enabling account mutations")
 	flags.Duration("refresh", 2*time.Second, "dashboard refresh interval")
 
-	for _, name := range []string{"profile", "server", "monitor-url", "credentials", "token", "username", "password", "authority-dir", "authority-operator-seed", "refresh"} {
+	for _, name := range []string{"profile", "server", "monitor-url", "credentials", "token", "username", "password", "nkey-seed", "user-jwt", "user-seed", "tls-ca", "tls-cert", "tls-key", "tls-server-name", "tls-insecure", "authority-dir", "authority-operator-seed", "refresh"} {
 		if err := values.BindPFlag(name, flags.Lookup(name)); err != nil {
 			panic(fmt.Sprintf("bind flag %s: %v", name, err))
 		}

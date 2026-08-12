@@ -31,18 +31,37 @@ The startup flow is:
 
 Saved connection profiles appear on the startup screen ordered by recent use;
 direct URL entry without authentication remains available with `n`. Profiles
-support multiple failover URLs and no authentication, token, credentials-file,
-or username/password authentication. Local state is written atomically with
-mode `0600`, while list and export output never include secrets:
+support multiple failover URLs; no authentication, token, credentials-file,
+username/password, NKey, or user JWT authentication; and CA/client-certificate
+TLS controls. Local state is written atomically with mode `0600`, seeds and
+credentials are resolved only when needed, and list/export output never includes
+secrets. Credentials embedded in server URLs are rejected.
 
     nats-tui profile save local-events --server-url nats://127.0.0.1:4222
     nats-tui profile save production \
       --server-url nats://a:4222,nats://b:4222 \
-      --auth-user ops --auth-password "$NATS_PASSWORD"
+      --auth-user ops --auth-password env://NATS_PASSWORD
     nats-tui profile list
     nats-tui profile test production
     nats-tui --profile production stream list
     nats-tui profile export > profiles.sanitized.json
+    nats-tui profile save jwt-prod \
+      --server-url tls://nats.internal:4222 \
+      --user-jwt ~/.config/nats/user.jwt --user-seed ~/.config/nats/user.seed \
+      --tls-ca ~/.config/nats/ca.pem --tls-server-name nats.internal
+    nats-tui profile import-nats
+
+For reusable secrets, prefer resolver references such as
+`--auth-token env://NATS_TOKEN` or `--auth-password env://NATS_PASSWORD` so the
+value does not enter the profile file or sanitized output.
+
+NATS CLI context imports read the official JSON documents from the user config
+`nats/context` directory by default and preserve `file://`, `env://`, and embedded
+base64 credential references. Existing nats-tui profiles are skipped unless
+`--replace` is explicit. `--tls-insecure` is available for diagnostics and is
+rendered with a warning marker in the startup selector; it should not be used in
+production. External `op://` and `nsc://` resolvers are reported explicitly and
+must first be exported to a file or environment reference.
 
 Use arrow keys, h/l, tab, `1-9`, `0`, `A` (accounts), or `!` (alerts) to move between sections. Press c to return to
 the connection screen, ? for help, and q to quit from the workspace.

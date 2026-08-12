@@ -3,6 +3,8 @@ package bootstrap
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	app "github.com/clcsolutions/nats-tui/internal/app/connections"
@@ -18,6 +20,16 @@ func (r Runner) ListConnectionProfiles(ctx context.Context) ([]app.ProfileSummar
 }
 func (r Runner) DeleteConnectionProfile(ctx context.Context, name string) error {
 	return r.profileService().Delete(ctx, name)
+}
+func (r Runner) ImportNATSContexts(ctx context.Context, directory string, replace bool) (app.ImportResult, error) {
+	if directory == "" {
+		configDirectory, err := os.UserConfigDir()
+		if err != nil {
+			return app.ImportResult{}, fmt.Errorf("find NATS context directory: %w", err)
+		}
+		directory = filepath.Join(configDirectory, "nats", "context")
+	}
+	return r.profileService().ImportNATSContexts(ctx, directory, replace)
 }
 func (r Runner) ResolveConnectionProfile(ctx context.Context, name string, base config.Settings) (config.Settings, error) {
 	profile, err := r.profileService().Find(ctx, name)
@@ -52,5 +64,6 @@ func (r Runner) TestConnectionProfile(ctx context.Context, name string) (app.Pro
 
 func settingsFromProfile(profile domain.Profile) config.Settings {
 	auth := profile.Authentication()
-	return config.Settings{Profile: profile.Name(), Server: profile.Server(), MonitorURL: profile.MonitorURL(), Credentials: auth.Credentials(), Token: auth.Token(), Username: auth.Username(), Password: auth.Password(), Refresh: 2 * time.Second}
+	tlsConfig := profile.TLS()
+	return config.Settings{Profile: profile.Name(), Server: profile.Server(), MonitorURL: profile.MonitorURL(), Credentials: auth.Credentials(), Token: auth.Token(), Username: auth.Username(), Password: auth.Password(), NKeySeed: auth.NKeySeed(), UserJWT: auth.UserJWT(), UserSeed: auth.UserSeed(), TLSCA: tlsConfig.CAFile(), TLSCert: tlsConfig.CertificateFile(), TLSKey: tlsConfig.KeyFile(), TLSServerName: tlsConfig.ServerName(), TLSInsecure: tlsConfig.Insecure(), Refresh: 2 * time.Second}
 }

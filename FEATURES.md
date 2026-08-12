@@ -34,7 +34,7 @@ application and adapter boundaries.
 - [ ] Read-only safety mode.
 - [ ] Destructive-operation audit log.
 
-## Connection Profiles and Authentication — Partial
+## Connection Profiles and Authentication — Complete
 
 - [x] Connect using a single editable NATS URL.
 - [x] Connect without authentication.
@@ -44,12 +44,12 @@ application and adapter boundaries.
 - [x] Startup profile selector and recent connections.
 - [x] Multiple server URLs with failover.
 - [x] Username/password authentication.
-- [ ] NKey seed authentication.
-- [ ] JWT authentication.
-- [ ] TLS CA, client certificate, client key, server name, and verification controls.
+- [x] NKey seed authentication.
+- [x] JWT authentication.
+- [x] TLS CA, client certificate, client key, server name, and verification controls.
 - [x] Connection test with actionable diagnostics.
-- [ ] Secure handling and redaction of secrets.
-- [ ] Import profiles from NATS CLI contexts.
+- [x] Secure handling and redaction of secrets.
+- [x] Import profiles from NATS CLI contexts.
 - [x] Export sanitized profile configuration.
 
 ## Dashboard and Real-Time Metrics — Partial

@@ -12,16 +12,24 @@ import (
 )
 
 type Settings struct {
-	Profile      string
-	Server       string
-	MonitorURL   string
-	Credentials  string
-	Token        string
-	Username     string
-	Password     string
-	AuthorityDir string
-	OperatorSeed string
-	Refresh      time.Duration
+	Profile       string
+	Server        string
+	MonitorURL    string
+	Credentials   string
+	Token         string
+	Username      string
+	Password      string
+	NKeySeed      string
+	UserJWT       string
+	UserSeed      string
+	TLSCA         string
+	TLSCert       string
+	TLSKey        string
+	TLSServerName string
+	TLSInsecure   bool
+	AuthorityDir  string
+	OperatorSeed  string
+	Refresh       time.Duration
 }
 
 func Configure(v *viper.Viper, configFile string) error {
@@ -53,15 +61,23 @@ func Configure(v *viper.Viper, configFile string) error {
 
 func Load(v *viper.Viper) Settings {
 	return Settings{
-		Profile:      v.GetString("profile"),
-		Server:       v.GetString("server"),
-		MonitorURL:   v.GetString("monitor-url"),
-		Credentials:  v.GetString("credentials"),
-		Token:        v.GetString("token"),
-		Username:     v.GetString("username"),
-		Password:     v.GetString("password"),
-		AuthorityDir: v.GetString("authority-dir"),
-		OperatorSeed: v.GetString("authority-operator-seed"),
-		Refresh:      v.GetDuration("refresh"),
+		Profile:       v.GetString("profile"),
+		Server:        v.GetString("server"),
+		MonitorURL:    v.GetString("monitor-url"),
+		Credentials:   v.GetString("credentials"),
+		Token:         v.GetString("token"),
+		Username:      v.GetString("username"),
+		Password:      v.GetString("password"),
+		NKeySeed:      v.GetString("nkey-seed"),
+		UserJWT:       v.GetString("user-jwt"),
+		UserSeed:      v.GetString("user-seed"),
+		TLSCA:         v.GetString("tls-ca"),
+		TLSCert:       v.GetString("tls-cert"),
+		TLSKey:        v.GetString("tls-key"),
+		TLSServerName: v.GetString("tls-server-name"),
+		TLSInsecure:   v.GetBool("tls-insecure"),
+		AuthorityDir:  v.GetString("authority-dir"),
+		OperatorSeed:  v.GetString("authority-operator-seed"),
+		Refresh:       v.GetDuration("refresh"),
 	}
 }

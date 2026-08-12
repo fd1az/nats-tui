@@ -16,6 +16,7 @@ import (
 	"github.com/clcsolutions/nats-tui/internal/adapters/jwtauthority"
 	"github.com/clcsolutions/nats-tui/internal/adapters/localfiles"
 	"github.com/clcsolutions/nats-tui/internal/adapters/localstate"
+	adaptercontext "github.com/clcsolutions/nats-tui/internal/adapters/natscontext"
 	"github.com/clcsolutions/nats-tui/internal/adapters/natsmonitor"
 	"github.com/clcsolutions/nats-tui/internal/app/alerts"
 	appbookmarks "github.com/clcsolutions/nats-tui/internal/app/bookmarks"
@@ -59,6 +60,7 @@ type Runner struct {
 	bookmarkStateMu    *sync.Mutex
 	bookmarkStates     map[string]*localstate.BookmarkRepository
 	profileRepository  connections.ProfileRepository
+	contextSource      connections.ContextSource
 	readPayload        func(string) ([]byte, error)
 	authoritySigner    func([]byte) (operator.AuthoritySigner, error)
 	accountSigner      func([]byte) (operator.AuthoritySigner, error)
@@ -195,7 +197,11 @@ func (r Runner) profileService() connections.ProfileService {
 	if repository == nil {
 		repository = defaultProfileRepository()
 	}
-	return connections.NewProfileService(repository, r.clock)
+	contextSource := r.contextSource
+	if contextSource == nil {
+		contextSource = adaptercontext.NewImporter(adaptercontext.OSFileSystem{})
+	}
+	return connections.NewProfileImportService(repository, r.clock, contextSource)
 }
 
 func (r Runner) WithProfileDependencies(repository connections.ProfileRepository, clock requestreply.Clock) Runner {
@@ -203,6 +209,14 @@ func (r Runner) WithProfileDependencies(repository connections.ProfileRepository
 		panic("profile dependencies cannot be nil")
 	}
 	r.profileRepository, r.clock = repository, clock
+	return r
+}
+
+func (r Runner) WithContextImportDependency(source connections.ContextSource) Runner {
+	if source == nil {
+		panic("context source cannot be nil")
+	}
+	r.contextSource = source
 	return r
 }
 

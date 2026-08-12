@@ -1,9 +1,14 @@
 package natsmonitor
 
 import (
+	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -23,6 +28,7 @@ import (
 	domaintopology "github.com/clcsolutions/nats-tui/internal/domain/topology"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
+	"github.com/nats-io/nkeys"
 )
 
 type Monitor struct {
@@ -128,17 +134,17 @@ func ConnectWithClock(settings config.Settings, clock Clock) (*Monitor, error) {
 		nats.Timeout(5 * time.Second),
 		nats.MaxReconnects(-1),
 	}
-	if settings.Credentials != "" {
-		options = append(options, nats.UserCredentials(settings.Credentials))
+	authOptions, err := authenticationOptions(settings, readCredential)
+	if err != nil {
+		return nil, err
 	}
-	if settings.Token != "" {
-		options = append(options, nats.Token(settings.Token))
+	options = append(options, authOptions...)
+	tlsOption, err := transportSecurityOption(settings, readCredential)
+	if err != nil {
+		return nil, err
 	}
-	if settings.Username != "" || settings.Password != "" {
-		if settings.Username == "" || settings.Password == "" {
-			return nil, errors.New("NATS username and password must be configured together")
-		}
-		options = append(options, nats.UserInfo(settings.Username, settings.Password))
+	if tlsOption != nil {
+		options = append(options, tlsOption)
 	}
 
 	connection, err := nats.Connect(settings.Server, options...)
@@ -164,6 +170,201 @@ func ConnectWithClock(settings config.Settings, clock Clock) (*Monitor, error) {
 		monitor.operatorFallback = fallback
 	}
 	return monitor, nil
+}
+
+type readFileFunc func(string) ([]byte, error)
+
+func authenticationOptions(settings config.Settings, readFile readFileFunc) ([]nats.Option, error) {
+	configured := 0
+	for _, enabled := range []bool{settings.Credentials != "", settings.Token != "", settings.Username != "" || settings.Password != "", settings.NKeySeed != "", settings.UserJWT != "" || settings.UserSeed != ""} {
+		if enabled {
+			configured++
+		}
+	}
+	if configured > 1 {
+		return nil, errors.New("configure exactly one NATS authentication method")
+	}
+	switch {
+	case settings.Credentials != "":
+		return []nats.Option{credentialsOption(settings.Credentials, readFile)}, nil
+	case settings.Token != "":
+		token, err := stringSecret(settings.Token, readFile)
+		if err != nil {
+			return nil, fmt.Errorf("resolve NATS token: %w", err)
+		}
+		return []nats.Option{nats.Token(token)}, nil
+	case settings.Username != "" || settings.Password != "":
+		if settings.Username == "" || settings.Password == "" {
+			return nil, errors.New("NATS username and password must be configured together")
+		}
+		password, err := stringSecret(settings.Password, readFile)
+		if err != nil {
+			return nil, fmt.Errorf("resolve NATS password: %w", err)
+		}
+		return []nats.Option{nats.UserInfo(settings.Username, password)}, nil
+	case settings.NKeySeed != "":
+		return nkeyOptions(settings.NKeySeed, "", readFile)
+	case settings.UserJWT != "" || settings.UserSeed != "":
+		if settings.UserJWT == "" || settings.UserSeed == "" {
+			return nil, errors.New("NATS user JWT and seed must be configured together")
+		}
+		return nkeyOptions(settings.UserSeed, settings.UserJWT, readFile)
+	default:
+		return nil, nil
+	}
+}
+
+func stringSecret(value string, readFile readFileFunc) (string, error) {
+	if !strings.HasPrefix(value, "file://") && !strings.HasPrefix(value, "env://") && !strings.HasPrefix(value, "data:;base64,") {
+		return value, nil
+	}
+	contents, err := readFile(value)
+	if err != nil {
+		return "", err
+	}
+	defer wipe(contents)
+	return string(contents), nil
+}
+
+func credentialsOption(reference string, readFile readFileFunc) nats.Option {
+	userJWT := func() (string, error) {
+		contents, err := readFile(reference)
+		if err != nil {
+			return "", err
+		}
+		defer wipe(contents)
+		return nkeys.ParseDecoratedJWT(contents)
+	}
+	sign := func(nonce []byte) ([]byte, error) {
+		contents, err := readFile(reference)
+		if err != nil {
+			return nil, err
+		}
+		defer wipe(contents)
+		pair, err := nkeys.ParseDecoratedNKey(contents)
+		if err != nil {
+			return nil, err
+		}
+		defer pair.Wipe()
+		return pair.Sign(nonce)
+	}
+	return nats.UserJWT(userJWT, sign)
+}
+
+func nkeyOptions(seedPath, jwtPath string, readFile readFileFunc) ([]nats.Option, error) {
+	seed, err := readFile(seedPath)
+	if err != nil {
+		return nil, fmt.Errorf("read NKey seed: %w", err)
+	}
+	defer wipe(seed)
+	pair, err := nkeys.FromSeed(bytes.TrimSpace(seed))
+	if err != nil {
+		return nil, fmt.Errorf("parse NKey seed: %w", err)
+	}
+	publicKey, err := pair.PublicKey()
+	if err != nil {
+		return nil, fmt.Errorf("derive NKey public key: %w", err)
+	}
+	pair.Wipe()
+	if !nkeys.IsValidPublicUserKey(publicKey) {
+		return nil, errors.New("NKey seed is not a user seed")
+	}
+	sign := func(nonce []byte) ([]byte, error) {
+		freshSeed, readErr := readFile(seedPath)
+		if readErr != nil {
+			return nil, readErr
+		}
+		defer wipe(freshSeed)
+		freshPair, pairErr := nkeys.FromSeed(bytes.TrimSpace(freshSeed))
+		if pairErr != nil {
+			return nil, pairErr
+		}
+		defer freshPair.Wipe()
+		return freshPair.Sign(nonce)
+	}
+	if jwtPath == "" {
+		return []nats.Option{nats.Nkey(publicKey, sign)}, nil
+	}
+	userJWT := func() (string, error) {
+		jwt, readErr := readFile(jwtPath)
+		if readErr != nil {
+			return "", readErr
+		}
+		return string(bytes.TrimSpace(jwt)), nil
+	}
+	return []nats.Option{nats.UserJWT(userJWT, sign)}, nil
+}
+
+func readCredential(reference string) ([]byte, error) {
+	reference = strings.TrimSpace(reference)
+	switch {
+	case strings.HasPrefix(reference, "file://"):
+		return os.ReadFile(strings.TrimPrefix(reference, "file://"))
+	case strings.HasPrefix(reference, "env://"):
+		name := strings.TrimPrefix(reference, "env://")
+		value, exists := os.LookupEnv(name)
+		if !exists {
+			return nil, fmt.Errorf("credential environment variable %s is not set", name)
+		}
+		return []byte(value), nil
+	case strings.HasPrefix(reference, "data:;base64,"):
+		value, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(reference, "data:;base64,"))
+		if err != nil {
+			return nil, fmt.Errorf("decode embedded credential: %w", err)
+		}
+		return value, nil
+	case strings.HasPrefix(reference, "op://"), strings.HasPrefix(reference, "nsc://"):
+		return nil, fmt.Errorf("credential resolver %q is not supported; export it to a file or environment variable", strings.SplitN(reference, "://", 2)[0])
+	case strings.Contains(reference, "-----BEGIN NATS USER JWT-----"), strings.HasPrefix(reference, "SU"), strings.HasPrefix(reference, "eyJ"):
+		return []byte(reference), nil
+	default:
+		return os.ReadFile(reference)
+	}
+}
+
+func transportSecurityOption(settings config.Settings, readFile readFileFunc) (nats.Option, error) {
+	enabled := settings.TLSCA != "" || settings.TLSCert != "" || settings.TLSKey != "" || settings.TLSServerName != "" || settings.TLSInsecure
+	if !enabled {
+		return nil, nil
+	}
+	if (settings.TLSCert == "") != (settings.TLSKey == "") {
+		return nil, errors.New("TLS client certificate and key must be configured together")
+	}
+	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12, ServerName: settings.TLSServerName, InsecureSkipVerify: settings.TLSInsecure} // #nosec G402 -- explicit operator-controlled diagnostic option.
+	if settings.TLSCA != "" {
+		pem, err := readFile(settings.TLSCA)
+		if err != nil {
+			return nil, fmt.Errorf("read TLS CA: %w", err)
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(pem) {
+			return nil, errors.New("TLS CA contains no valid certificates")
+		}
+		tlsConfig.RootCAs = pool
+	}
+	if settings.TLSCert != "" {
+		certPEM, err := readFile(settings.TLSCert)
+		if err != nil {
+			return nil, fmt.Errorf("read TLS certificate: %w", err)
+		}
+		keyPEM, err := readFile(settings.TLSKey)
+		if err != nil {
+			return nil, fmt.Errorf("read TLS key: %w", err)
+		}
+		defer wipe(keyPEM)
+		certificate, err := tls.X509KeyPair(certPEM, keyPEM)
+		if err != nil {
+			return nil, fmt.Errorf("parse TLS client certificate: %w", err)
+		}
+		tlsConfig.Certificates = []tls.Certificate{certificate}
+	}
+	return nats.Secure(tlsConfig), nil
+}
+
+func wipe(value []byte) {
+	for i := range value {
+		value[i] = 0
+	}
 }
 
 func (m *Monitor) Snapshot(ctx context.Context) (dashboard.Snapshot, error) {

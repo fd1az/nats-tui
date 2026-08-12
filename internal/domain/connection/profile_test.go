@@ -2,6 +2,7 @@ package connection
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -25,6 +26,14 @@ func TestProfileRejectsInvalidServer(t *testing.T) {
 	}
 }
 
+func TestProfileRejectsCredentialsEmbeddedInServerURL(t *testing.T) {
+	t.Parallel()
+	_, err := NewProfile("edge", []string{"nats://ops:secret@nats.internal:4222"}, "", NoAuthentication())
+	if !errors.Is(err, ErrServerCredentials) || strings.Contains(err.Error(), "secret") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
 func TestDirectProfileDerivesName(t *testing.T) {
 	t.Parallel()
 	profile, err := NewDirectProfile("", "nats://127.0.0.1:4222")
@@ -44,5 +53,19 @@ func TestSortByRecent(t *testing.T) {
 	SortByRecent(items)
 	if items[0].Name() != "b" {
 		t.Fatalf("items=%v", items)
+	}
+}
+
+func TestJWTAndTLSRequireCompletePairs(t *testing.T) {
+	t.Parallel()
+	if _, err := JWTAuthentication("user.jwt", ""); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("JWT error=%v", err)
+	}
+	if _, err := NewTLS("", "client.pem", "", "", false); err == nil {
+		t.Fatal("incomplete client certificate accepted")
+	}
+	tlsConfig, err := NewTLS("ca.pem", "client.pem", "client.key", "nats.internal", false)
+	if err != nil || !tlsConfig.Enabled() {
+		t.Fatalf("tls=%+v err=%v", tlsConfig, err)
 	}
 }

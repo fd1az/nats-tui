@@ -33,6 +33,9 @@ func (s *profileManagerStub) ResolveConnectionProfile(_ context.Context, name st
 	base.Profile, base.Server, base.Username, base.Password = name, "nats://prod:4222", "ops", "secret"
 	return base, nil
 }
+func (s *profileManagerStub) ImportNATSContexts(context.Context, string, bool) (app.ImportResult, error) {
+	return app.ImportResult{Imported: []string{"prod"}}, nil
+}
 
 func TestProfileSaveAndSanitizedList(t *testing.T) {
 	service := &profileManagerStub{items: []app.ProfileSummary{{Name: "prod", Servers: []string{"nats://a:4222", "nats://b:4222"}, Auth: "user-password", Username: "ops"}}}
@@ -66,6 +69,20 @@ func TestExplicitProfileResolvesBeforeOperationalCommand(t *testing.T) {
 	root.SetArgs([]string{"--profile", "prod", "subject", "list", "--output", "plain"})
 	if err := root.ExecuteContext(t.Context()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestProfileImportCommandReportsImportedContexts(t *testing.T) {
+	service := &profileManagerStub{}
+	root := NewRoot(Dependencies{Profiles: service})
+	output := new(bytes.Buffer)
+	root.SetOut(output)
+	root.SetArgs([]string{"profile", "import-nats", "--directory", "/contexts"})
+	if err := root.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "imported 1") || !strings.Contains(output.String(), "prod") {
+		t.Fatalf("output=%s", output)
 	}
 }
 

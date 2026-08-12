@@ -43,6 +43,12 @@ type fixedClock struct{ at time.Time }
 
 func (c fixedClock) Now() time.Time { return c.at }
 
+type contextSourceStub struct{ values []ProfileInput }
+
+func (s contextSourceStub) Profiles(context.Context, string) ([]ProfileInput, error) {
+	return append([]ProfileInput(nil), s.values...), nil
+}
+
 func TestProfileServiceKeepsSecretsOutOfListAndTracksRecent(t *testing.T) {
 	repository := &profileMemory{}
 	now := time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC)
@@ -59,5 +65,31 @@ func TestProfileServiceKeepsSecretsOutOfListAndTracksRecent(t *testing.T) {
 	}
 	if len(items) != 1 || items[0].Auth != domain.AuthUserPass || items[0].Username != "ops" || !items[0].LastUsedAt.Equal(now) {
 		t.Fatalf("items=%+v", items)
+	}
+}
+
+func TestImportNATSContextsSkipsExistingUnlessReplaceRequested(t *testing.T) {
+	repository := &profileMemory{}
+	existing, _ := domain.NewProfile("prod", []string{"nats://old:4222"}, "", domain.NoAuthentication())
+	_ = repository.Save(t.Context(), existing)
+	source := contextSourceStub{values: []ProfileInput{{Name: "prod", Servers: []string{"nats://new:4222"}}, {Name: "dev", Servers: []string{"nats://dev:4222"}}}}
+	service := NewProfileImportService(repository, fixedClock{}, source)
+	result, err := service.ImportNATSContexts(t.Context(), "contexts", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Imported) != 1 || result.Imported[0] != "dev" || len(result.Skipped) != 1 {
+		t.Fatalf("result=%+v", result)
+	}
+	prod, _ := repository.Find(t.Context(), "prod")
+	if prod.Server() != "nats://old:4222" {
+		t.Fatalf("prod=%s", prod.Server())
+	}
+	if _, err := service.ImportNATSContexts(t.Context(), "contexts", true); err != nil {
+		t.Fatal(err)
+	}
+	prod, _ = repository.Find(t.Context(), "prod")
+	if prod.Server() != "nats://new:4222" {
+		t.Fatalf("prod=%s", prod.Server())
 	}
 }

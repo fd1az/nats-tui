@@ -21,13 +21,22 @@ type ProfileRepository interface {
 	Delete(context.Context, string) error
 }
 
+type ContextSource interface {
+	Profiles(context.Context, string) ([]ProfileInput, error)
+}
+
+type ImportResult struct{ Imported, Skipped []string }
+
 type ProfileSummary struct {
-	Name       string
-	Servers    []string
-	MonitorURL string
-	Auth       domain.AuthKind
-	Username   string
-	LastUsedAt time.Time
+	Name        string
+	Servers     []string
+	MonitorURL  string
+	Auth        domain.AuthKind
+	Username    string
+	TLS         bool
+	TLSServer   string
+	InsecureTLS bool
+	LastUsedAt  time.Time
 }
 
 type ProfileTestResult struct {
@@ -38,6 +47,9 @@ type ProfileTestResult struct {
 
 type ProfileInput struct {
 	Name, MonitorURL, Token, Credentials, Username, Password string
+	NKeySeed, UserJWT, UserSeed                              string
+	TLSCA, TLSCert, TLSKey, TLSServerName                    string
+	TLSInsecure                                              bool
 	Servers                                                  []string
 }
 
@@ -52,6 +64,12 @@ func (i ProfileInput) Profile() (domain.Profile, error) {
 	if i.Username != "" || i.Password != "" {
 		configured++
 	}
+	if i.NKeySeed != "" {
+		configured++
+	}
+	if i.UserJWT != "" || i.UserSeed != "" {
+		configured++
+	}
 	if configured > 1 {
 		return domain.Profile{}, domain.ErrInvalidCredentials
 	}
@@ -64,16 +82,64 @@ func (i ProfileInput) Profile() (domain.Profile, error) {
 		auth, err = domain.CredentialsAuthentication(i.Credentials)
 	case i.Username != "" || i.Password != "":
 		auth, err = domain.UserPasswordAuthentication(i.Username, i.Password)
+	case i.NKeySeed != "":
+		auth, err = domain.NKeyAuthentication(i.NKeySeed)
+	case i.UserJWT != "" || i.UserSeed != "":
+		auth, err = domain.JWTAuthentication(i.UserJWT, i.UserSeed)
 	}
 	if err != nil {
 		return domain.Profile{}, err
 	}
-	return domain.NewProfile(i.Name, i.Servers, i.MonitorURL, auth)
+	tlsConfig, err := domain.NewTLS(i.TLSCA, i.TLSCert, i.TLSKey, i.TLSServerName, i.TLSInsecure)
+	if err != nil {
+		return domain.Profile{}, err
+	}
+	return domain.NewProfile(i.Name, i.Servers, i.MonitorURL, auth, tlsConfig)
 }
 
 type ProfileService struct {
 	repository ProfileRepository
 	clock      Clock
+	contexts   ContextSource
+}
+
+func NewProfileImportService(repository ProfileRepository, clock Clock, contexts ContextSource) ProfileService {
+	service := NewProfileService(repository, clock)
+	if contexts == nil {
+		panic("nil NATS context source")
+	}
+	service.contexts = contexts
+	return service
+}
+
+func (s ProfileService) ImportNATSContexts(ctx context.Context, directory string, replace bool) (ImportResult, error) {
+	if s.contexts == nil {
+		return ImportResult{}, errors.New("NATS context import is unavailable")
+	}
+	inputs, err := s.contexts.Profiles(ctx, directory)
+	if err != nil {
+		return ImportResult{}, err
+	}
+	result := ImportResult{}
+	for _, input := range inputs {
+		if !replace {
+			_, findErr := s.repository.Find(ctx, input.Name)
+			switch {
+			case findErr == nil:
+				result.Skipped = append(result.Skipped, input.Name)
+				continue
+			case !errors.Is(findErr, ErrProfileNotFound):
+				return result, findErr
+			}
+		}
+		if err := s.Save(ctx, input); err != nil {
+			return result, errors.Join(errors.New("import NATS context "+input.Name), err)
+		}
+		result.Imported = append(result.Imported, input.Name)
+	}
+	sort.Strings(result.Imported)
+	sort.Strings(result.Skipped)
+	return result, nil
 }
 
 func NewProfileService(repository ProfileRepository, clock Clock) ProfileService {
@@ -100,7 +166,8 @@ func (s ProfileService) List(ctx context.Context) ([]ProfileSummary, error) {
 	result := make([]ProfileSummary, 0, len(profiles))
 	for _, profile := range profiles {
 		auth := profile.Authentication()
-		result = append(result, ProfileSummary{Name: profile.Name(), Servers: profile.Servers(), MonitorURL: profile.MonitorURL(), Auth: auth.Kind(), Username: auth.Username(), LastUsedAt: profile.LastUsedAt()})
+		tlsConfig := profile.TLS()
+		result = append(result, ProfileSummary{Name: profile.Name(), Servers: profile.Servers(), MonitorURL: profile.MonitorURL(), Auth: auth.Kind(), Username: auth.Username(), TLS: tlsConfig.Enabled(), TLSServer: tlsConfig.ServerName(), InsecureTLS: tlsConfig.Insecure(), LastUsedAt: profile.LastUsedAt()})
 	}
 	return result, nil
 }
