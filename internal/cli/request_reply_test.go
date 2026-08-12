@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/clcsolutions/nats-tui/internal/config"
-	domain "github.com/clcsolutions/nats-tui/internal/domain/requestreply"
+	"github.com/fd1az/nats-tui/internal/config"
+	domain "github.com/fd1az/nats-tui/internal/domain/requestreply"
 )
 
 type coreServiceStub struct {

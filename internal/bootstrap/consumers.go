@@ -3,8 +3,8 @@ package bootstrap
 import (
 	"context"
 
-	"github.com/clcsolutions/nats-tui/internal/app/consumers"
-	"github.com/clcsolutions/nats-tui/internal/config"
+	"github.com/fd1az/nats-tui/internal/app/consumers"
+	"github.com/fd1az/nats-tui/internal/config"
 )
 
 func (r Runner) ListConsumerCatalog(ctx context.Context, settings config.Settings) ([]consumers.Summary, error) {

@@ -7,8 +7,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/clcsolutions/nats-tui/internal/app/activity"
-	"github.com/clcsolutions/nats-tui/internal/app/preferences"
+	"github.com/fd1az/nats-tui/internal/app/activity"
+	"github.com/fd1az/nats-tui/internal/app/preferences"
 )
 
 const toastLifetime = 5 * time.Second

@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/clcsolutions/nats-tui/internal/app/messages"
-	"github.com/clcsolutions/nats-tui/internal/config"
-	domain "github.com/clcsolutions/nats-tui/internal/domain/requestreply"
+	"github.com/fd1az/nats-tui/internal/app/messages"
+	"github.com/fd1az/nats-tui/internal/config"
+	domain "github.com/fd1az/nats-tui/internal/domain/requestreply"
 )
 
 type messageManagerStub struct {

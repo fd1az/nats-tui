@@ -6,8 +6,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	app "github.com/clcsolutions/nats-tui/internal/app/topology"
-	domain "github.com/clcsolutions/nats-tui/internal/domain/topology"
+	app "github.com/fd1az/nats-tui/internal/app/topology"
+	domain "github.com/fd1az/nats-tui/internal/domain/topology"
 )
 
 type LoadTopologyFunc func() tea.Cmd

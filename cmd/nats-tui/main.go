@@ -7,8 +7,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/clcsolutions/nats-tui/internal/bootstrap"
-	"github.com/clcsolutions/nats-tui/internal/cli"
+	"github.com/fd1az/nats-tui/internal/bootstrap"
+	"github.com/fd1az/nats-tui/internal/cli"
 )
 
 var (

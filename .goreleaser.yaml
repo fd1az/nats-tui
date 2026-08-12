@@ -1,0 +1,107 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/goreleaser/goreleaser/v2.17.1/www/docs/static/schema.json
+version: 2
+
+project_name: nats-tui
+
+builds:
+  - id: nats-tui
+    main: ./cmd/nats-tui
+    binary: nats-tui
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - >-
+        -s -w
+        -X main.version={{ .Version }}
+        -X main.commit={{ .Commit }}
+        -X main.date={{ .Date }}
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: release-archives
+    ids:
+      - nats-tui
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    files:
+      - README.md
+      - FEATURES.md
+
+nfpms:
+  - id: linux-packages
+    ids:
+      - nats-tui
+    package_name: nats-tui
+    vendor: fd1az
+    homepage: https://github.com/fd1az/nats-tui
+    maintainer: Facundo Diaz <fdiaz.dev@gmail.com>
+    description: A beautiful, keyboard-first terminal workspace for NATS JetStream.
+    formats:
+      - apk
+      - deb
+      - rpm
+    bindir: /usr/bin
+    file_name_template: "{{ .ConventionalFileName }}"
+    contents:
+      - src: README.md
+        dst: /usr/share/doc/nats-tui/README.md
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^chore:"
+      - "^ci:"
+      - "^docs:"
+      - "^style:"
+      - "^test:"
+
+homebrew_casks:
+  - name: nats-tui
+    ids:
+      - release-archives
+    binaries:
+      - nats-tui
+    homepage: https://github.com/fd1az/nats-tui
+    description: A beautiful terminal workspace for NATS JetStream
+    repository:
+      owner: fd1az
+      name: homebrew-tap
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+    commit_author:
+      name: fd1az
+      email: fdiaz.dev@gmail.com
+
+scoops:
+  - name: nats-tui
+    homepage: https://github.com/fd1az/nats-tui
+    description: A beautiful terminal workspace for NATS JetStream
+    repository:
+      owner: fd1az
+      name: scoop-bucket
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+    commit_author:
+      name: fd1az
+      email: fdiaz.dev@gmail.com
+
+release:
+  prerelease: auto
+

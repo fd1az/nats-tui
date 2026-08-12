@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/clcsolutions/nats-tui/internal/app/consumers"
+	"github.com/fd1az/nats-tui/internal/app/consumers"
 )
 
 func TestConsumerConfigurationRoundTripPreservesAdvancedFields(t *testing.T) {

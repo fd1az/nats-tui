@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/clcsolutions/nats-tui/internal/app/streams"
+	"github.com/fd1az/nats-tui/internal/app/streams"
 )
 
 func TestCommandBarFuzzyNavigationAndDestructivePreview(t *testing.T) {

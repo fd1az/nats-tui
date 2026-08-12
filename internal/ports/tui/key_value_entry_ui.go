@@ -11,7 +11,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/clcsolutions/nats-tui/internal/app/kvstore"
+	"github.com/fd1az/nats-tui/internal/app/kvstore"
 )
 
 type keyValueEntryForm struct {

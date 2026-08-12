@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	app "github.com/clcsolutions/nats-tui/internal/app/alerts"
-	"github.com/clcsolutions/nats-tui/internal/config"
+	app "github.com/fd1az/nats-tui/internal/app/alerts"
+	"github.com/fd1az/nats-tui/internal/config"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )

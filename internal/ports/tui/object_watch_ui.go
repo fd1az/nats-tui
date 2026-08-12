@@ -4,7 +4,7 @@ import (
 	"sort"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/clcsolutions/nats-tui/internal/app/objectstore"
+	"github.com/fd1az/nats-tui/internal/app/objectstore"
 )
 
 func waitForObjectWatchEvent(generation uint64, events <-chan objectstore.ObjectEvent) tea.Cmd {

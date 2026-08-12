@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	app "github.com/clcsolutions/nats-tui/internal/app/requestreply"
-	domain "github.com/clcsolutions/nats-tui/internal/domain/requestreply"
+	app "github.com/fd1az/nats-tui/internal/app/requestreply"
+	domain "github.com/fd1az/nats-tui/internal/domain/requestreply"
 )
 
 type StateFile interface {

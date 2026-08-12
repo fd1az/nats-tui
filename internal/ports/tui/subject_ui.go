@@ -9,8 +9,8 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	appoperator "github.com/clcsolutions/nats-tui/internal/app/operator"
-	appsubjects "github.com/clcsolutions/nats-tui/internal/app/subjects"
+	appoperator "github.com/fd1az/nats-tui/internal/app/operator"
+	appsubjects "github.com/fd1az/nats-tui/internal/app/subjects"
 )
 
 const (

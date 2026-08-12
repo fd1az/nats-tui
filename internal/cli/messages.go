@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/clcsolutions/nats-tui/internal/app/messages"
-	"github.com/clcsolutions/nats-tui/internal/app/streams"
-	"github.com/clcsolutions/nats-tui/internal/config"
-	domain "github.com/clcsolutions/nats-tui/internal/domain/requestreply"
+	"github.com/fd1az/nats-tui/internal/app/messages"
+	"github.com/fd1az/nats-tui/internal/app/streams"
+	"github.com/fd1az/nats-tui/internal/config"
+	domain "github.com/fd1az/nats-tui/internal/domain/requestreply"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )

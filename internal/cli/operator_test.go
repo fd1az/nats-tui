@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	app "github.com/clcsolutions/nats-tui/internal/app/operator"
-	"github.com/clcsolutions/nats-tui/internal/config"
-	domain "github.com/clcsolutions/nats-tui/internal/domain/authority"
+	app "github.com/fd1az/nats-tui/internal/app/operator"
+	"github.com/fd1az/nats-tui/internal/config"
+	domain "github.com/fd1az/nats-tui/internal/domain/authority"
 )
 
 type stubOperatorCatalog struct{ catalog app.Catalog }

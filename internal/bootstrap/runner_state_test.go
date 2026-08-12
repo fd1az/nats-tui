@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	appbookmarks "github.com/clcsolutions/nats-tui/internal/app/bookmarks"
-	"github.com/clcsolutions/nats-tui/internal/config"
-	domain "github.com/clcsolutions/nats-tui/internal/domain/requestreply"
+	appbookmarks "github.com/fd1az/nats-tui/internal/app/bookmarks"
+	"github.com/fd1az/nats-tui/internal/config"
+	domain "github.com/fd1az/nats-tui/internal/domain/requestreply"
 )
 
 func TestRequestStateIsIsolatedByProfile(t *testing.T) {

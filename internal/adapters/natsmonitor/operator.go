@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	app "github.com/clcsolutions/nats-tui/internal/app/operator"
-	appTopology "github.com/clcsolutions/nats-tui/internal/app/topology"
+	app "github.com/fd1az/nats-tui/internal/app/operator"
+	appTopology "github.com/fd1az/nats-tui/internal/app/topology"
 	"github.com/nats-io/nats.go"
 	"sort"
 )

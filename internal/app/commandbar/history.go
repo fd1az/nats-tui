@@ -6,7 +6,7 @@ import (
 	"sort"
 	"time"
 
-	domain "github.com/clcsolutions/nats-tui/internal/domain/commandbar"
+	domain "github.com/fd1az/nats-tui/internal/domain/commandbar"
 )
 
 var ErrDefinitionNotFound = errors.New("custom command not found")

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/clcsolutions/nats-tui/internal/app/objectstore"
+	"github.com/fd1az/nats-tui/internal/app/objectstore"
 	"github.com/nats-io/nats.go/jetstream"
 )
 

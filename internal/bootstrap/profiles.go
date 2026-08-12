@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"time"
 
-	app "github.com/clcsolutions/nats-tui/internal/app/connections"
-	"github.com/clcsolutions/nats-tui/internal/config"
-	domain "github.com/clcsolutions/nats-tui/internal/domain/connection"
+	app "github.com/fd1az/nats-tui/internal/app/connections"
+	"github.com/fd1az/nats-tui/internal/config"
+	domain "github.com/fd1az/nats-tui/internal/domain/connection"
 )
 
 func (r Runner) SaveConnectionProfile(ctx context.Context, input app.ProfileInput) error {

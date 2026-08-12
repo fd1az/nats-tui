@@ -294,12 +294,12 @@ required system-account and decentralized-authentication APIs.
 - [ ] Permission-restricted account test fixtures.
 - [ ] Large-account performance benchmarks.
 - [ ] CI with test, race, vet, lint, and vulnerability scanning.
-- [ ] Cross-platform release binaries.
-- [ ] GoReleaser configuration and checksums.
-- [ ] Homebrew formula.
+- [x] Cross-platform release binaries for macOS, Linux, and Windows on AMD64 and ARM64.
+- [x] GoReleaser configuration, SHA-256 checksums, and Linux `.deb`, `.rpm`, and `.apk` packages.
+- [x] Homebrew cask, Scoop manifest, and verified shell/PowerShell installers.
 - [ ] Container image for remote/admin environments.
-- [ ] Version command and embedded build metadata.
-- [ ] Upgrade documentation and changelog.
+- [x] Version command and embedded build metadata.
+- [x] Install and upgrade documentation with generated release notes.
 
 ## Explicitly Out of Scope
 

@@ -7,7 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	app "github.com/clcsolutions/nats-tui/internal/app/alerts"
+	app "github.com/fd1az/nats-tui/internal/app/alerts"
 )
 
 type AlertServices struct {

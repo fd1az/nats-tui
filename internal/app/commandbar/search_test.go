@@ -3,7 +3,7 @@ package commandbar
 import (
 	"testing"
 
-	domain "github.com/clcsolutions/nats-tui/internal/domain/commandbar"
+	domain "github.com/fd1az/nats-tui/internal/domain/commandbar"
 )
 
 func TestSearchRanksContiguousTitleBeforeLooseSubsequence(t *testing.T) {

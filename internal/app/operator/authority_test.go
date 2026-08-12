@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	domain "github.com/clcsolutions/nats-tui/internal/domain/authority"
+	domain "github.com/fd1az/nats-tui/internal/domain/authority"
 )
 
 type stubAuthority struct{ account AccountBundle }

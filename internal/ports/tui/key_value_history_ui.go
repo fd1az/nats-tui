@@ -6,7 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/clcsolutions/nats-tui/internal/app/kvstore"
+	"github.com/fd1az/nats-tui/internal/app/kvstore"
 )
 
 func (m Model) updateKeyValueHistoryNavigation(key tea.KeyMsg) (tea.Model, tea.Cmd) {

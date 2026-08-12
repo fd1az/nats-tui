@@ -15,7 +15,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	domain "github.com/clcsolutions/nats-tui/internal/domain/requestreply"
+	domain "github.com/fd1az/nats-tui/internal/domain/requestreply"
 )
 
 type PublishCoreFunc func(domain.Message) tea.Cmd

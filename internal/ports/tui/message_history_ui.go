@@ -8,8 +8,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/clcsolutions/nats-tui/internal/app/messages"
-	"github.com/clcsolutions/nats-tui/internal/app/streams"
+	"github.com/fd1az/nats-tui/internal/app/messages"
+	"github.com/fd1az/nats-tui/internal/app/streams"
 )
 
 const messageHistoryFieldCount = 6

@@ -6,7 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	domain "github.com/clcsolutions/nats-tui/internal/domain/authority"
+	domain "github.com/fd1az/nats-tui/internal/domain/authority"
 )
 
 type operatorSigningKeyForm struct {

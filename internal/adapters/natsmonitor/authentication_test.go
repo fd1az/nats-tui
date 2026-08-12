@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/clcsolutions/nats-tui/internal/config"
+	"github.com/fd1az/nats-tui/internal/config"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nkeys"
 )

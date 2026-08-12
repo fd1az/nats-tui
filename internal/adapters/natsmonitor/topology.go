@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	app "github.com/clcsolutions/nats-tui/internal/app/topology"
-	domain "github.com/clcsolutions/nats-tui/internal/domain/topology"
+	app "github.com/fd1az/nats-tui/internal/app/topology"
+	domain "github.com/fd1az/nats-tui/internal/domain/topology"
 	"github.com/nats-io/nats.go"
 )
 

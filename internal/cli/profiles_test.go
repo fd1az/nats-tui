@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	app "github.com/clcsolutions/nats-tui/internal/app/connections"
-	"github.com/clcsolutions/nats-tui/internal/app/subjects"
-	"github.com/clcsolutions/nats-tui/internal/config"
+	app "github.com/fd1az/nats-tui/internal/app/connections"
+	"github.com/fd1az/nats-tui/internal/app/subjects"
+	"github.com/fd1az/nats-tui/internal/config"
 )
 
 type profileManagerStub struct {

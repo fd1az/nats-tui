@@ -4,7 +4,7 @@ import (
 	"errors"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/clcsolutions/nats-tui/internal/app/dashboard"
+	"github.com/fd1az/nats-tui/internal/app/dashboard"
 )
 
 type DashboardServices struct{ Load func(string) tea.Cmd }

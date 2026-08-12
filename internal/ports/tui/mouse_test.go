@@ -5,8 +5,8 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/clcsolutions/nats-tui/internal/app/preferences"
-	"github.com/clcsolutions/nats-tui/internal/app/streams"
+	"github.com/fd1az/nats-tui/internal/app/preferences"
+	"github.com/fd1az/nats-tui/internal/app/streams"
 )
 
 func mousePreferences(t *testing.T, enabled bool) preferences.Preferences {

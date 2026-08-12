@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/clcsolutions/nats-tui/internal/adapters/jwtauthority"
-	app "github.com/clcsolutions/nats-tui/internal/app/operator"
-	domain "github.com/clcsolutions/nats-tui/internal/domain/authority"
+	"github.com/fd1az/nats-tui/internal/adapters/jwtauthority"
+	app "github.com/fd1az/nats-tui/internal/app/operator"
+	domain "github.com/fd1az/nats-tui/internal/domain/authority"
 	"github.com/nats-io/nkeys"
 )
 

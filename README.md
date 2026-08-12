@@ -12,6 +12,64 @@ NUI is available locally
 under .reference/nui for behavioral reference and is intentionally excluded
 from this project's source and dependency graph.
 
+## Install
+
+Release artifacts are built for macOS, Linux, and Windows on AMD64 and ARM64.
+Every download is covered by the published `checksums.txt` SHA-256 manifest.
+Go users can also install directly without cloning:
+
+    go install github.com/fd1az/nats-tui/cmd/nats-tui@latest
+
+### Homebrew (macOS and Linux)
+
+    brew install --cask fd1az/tap/nats-tui
+
+Upgrade later with:
+
+    brew upgrade --cask nats-tui
+
+### Linux
+
+Install the latest release in `~/.local/bin` without cloning the repository:
+
+    curl -fsSL https://raw.githubusercontent.com/fd1az/nats-tui/main/scripts/install.sh | sh
+
+GitHub Releases also contains native `.deb`, `.rpm`, and `.apk` packages. For
+example:
+
+    sudo dpkg -i nats-tui_*_amd64.deb
+    sudo rpm -i nats-tui-*.x86_64.rpm
+    sudo apk add --allow-untrusted nats-tui_*_x86_64.apk
+
+Run the shell installer again to upgrade. A version can be pinned explicitly:
+
+    curl -fsSL https://raw.githubusercontent.com/fd1az/nats-tui/main/scripts/install.sh | NATS_TUI_VERSION=1.2.3 sh
+
+### Windows
+
+Scoop keeps installation and upgrades managed:
+
+    scoop bucket add fd1az https://github.com/fd1az/scoop-bucket
+    scoop install fd1az/nats-tui
+    scoop update nats-tui
+
+Without Scoop, use the checksum-verifying PowerShell installer. It installs to
+`%LOCALAPPDATA%\nats-tui\bin` and adds that directory to the user `PATH`:
+
+    irm https://raw.githubusercontent.com/fd1az/nats-tui/main/scripts/install.ps1 | iex
+
+### Publishing a release
+
+Pushing a semantic-version tag such as `v1.0.0` runs tests and vet, builds all
+platform archives and Linux packages, embeds version metadata, publishes the
+GitHub Release, and updates the Homebrew tap and Scoop bucket. Maintainers must
+first create `fd1az/homebrew-tap` and `fd1az/scoop-bucket`, then configure a
+fine-grained `TAP_GITHUB_TOKEN` Actions secret with contents write access to only
+those two repositories.
+
+    git tag v1.0.0
+    git push origin v1.0.0
+
 ## Run locally
 
 Requirements:

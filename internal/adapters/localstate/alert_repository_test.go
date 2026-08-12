@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	app "github.com/clcsolutions/nats-tui/internal/app/alerts"
-	domain "github.com/clcsolutions/nats-tui/internal/domain/alerts"
+	app "github.com/fd1az/nats-tui/internal/app/alerts"
+	domain "github.com/fd1az/nats-tui/internal/domain/alerts"
 )
 
 func TestAlertRepositoryRoundTripsAlertsRulesAndTransitions(t *testing.T) {

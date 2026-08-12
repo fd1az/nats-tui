@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	domain "github.com/clcsolutions/nats-tui/internal/domain/authority"
+	domain "github.com/fd1az/nats-tui/internal/domain/authority"
 )
 
 type AccountBundle struct {

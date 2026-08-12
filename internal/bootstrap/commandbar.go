@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
-	app "github.com/clcsolutions/nats-tui/internal/app/commandbar"
-	"github.com/clcsolutions/nats-tui/internal/config"
-	domain "github.com/clcsolutions/nats-tui/internal/domain/commandbar"
+	app "github.com/fd1az/nats-tui/internal/app/commandbar"
+	"github.com/fd1az/nats-tui/internal/config"
+	domain "github.com/fd1az/nats-tui/internal/domain/commandbar"
 )
 
 func (r Runner) commandStore(profile string) app.Repository {

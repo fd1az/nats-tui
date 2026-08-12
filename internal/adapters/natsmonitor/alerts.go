@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	domain "github.com/clcsolutions/nats-tui/internal/domain/alerts"
-	domaintopology "github.com/clcsolutions/nats-tui/internal/domain/topology"
+	domain "github.com/fd1az/nats-tui/internal/domain/alerts"
+	domaintopology "github.com/fd1az/nats-tui/internal/domain/topology"
 	"github.com/nats-io/nats.go"
 )
 

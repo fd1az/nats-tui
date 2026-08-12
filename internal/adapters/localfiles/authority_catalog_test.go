@@ -3,8 +3,8 @@ package localfiles
 import (
 	"testing"
 
-	"github.com/clcsolutions/nats-tui/internal/adapters/jwtauthority"
-	domain "github.com/clcsolutions/nats-tui/internal/domain/authority"
+	"github.com/fd1az/nats-tui/internal/adapters/jwtauthority"
+	domain "github.com/fd1az/nats-tui/internal/domain/authority"
 	"github.com/nats-io/nkeys"
 )
 

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	app "github.com/clcsolutions/nats-tui/internal/app/bookmarks"
-	domain "github.com/clcsolutions/nats-tui/internal/domain/bookmarks"
+	app "github.com/fd1az/nats-tui/internal/app/bookmarks"
+	domain "github.com/fd1az/nats-tui/internal/domain/bookmarks"
 )
 
 func TestBookmarkRepositoryRoundTripAndAtomicRetarget(t *testing.T) {

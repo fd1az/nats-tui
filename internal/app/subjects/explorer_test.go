@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/clcsolutions/nats-tui/internal/app/consumers"
-	"github.com/clcsolutions/nats-tui/internal/app/streams"
+	"github.com/fd1az/nats-tui/internal/app/consumers"
+	"github.com/fd1az/nats-tui/internal/app/streams"
 )
 
 func TestBuildCreatesSortedSubjectTreeWithWatchPatterns(t *testing.T) {

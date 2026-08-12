@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	domain "github.com/clcsolutions/nats-tui/internal/domain/requestreply"
+	domain "github.com/fd1az/nats-tui/internal/domain/requestreply"
 )
 
 type transportStub struct {

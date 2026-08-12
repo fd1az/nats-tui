@@ -8,9 +8,9 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/clcsolutions/nats-tui/internal/app/messages"
-	"github.com/clcsolutions/nats-tui/internal/app/streams"
-	domain "github.com/clcsolutions/nats-tui/internal/domain/requestreply"
+	"github.com/fd1az/nats-tui/internal/app/messages"
+	"github.com/fd1az/nats-tui/internal/app/streams"
+	domain "github.com/fd1az/nats-tui/internal/domain/requestreply"
 )
 
 type messageExportForm struct {

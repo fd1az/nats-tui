@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	app "github.com/clcsolutions/nats-tui/internal/app/operator"
-	domain "github.com/clcsolutions/nats-tui/internal/domain/authority"
+	app "github.com/fd1az/nats-tui/internal/app/operator"
+	domain "github.com/fd1az/nats-tui/internal/domain/authority"
 	jwt "github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
 )

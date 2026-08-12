@@ -5,8 +5,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/clcsolutions/nats-tui/internal/app/consumers"
-	"github.com/clcsolutions/nats-tui/internal/app/streams"
+	"github.com/fd1az/nats-tui/internal/app/consumers"
+	"github.com/fd1az/nats-tui/internal/app/streams"
 )
 
 // Node is one visible row in the flattened subject tree.

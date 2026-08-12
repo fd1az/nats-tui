@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/clcsolutions/nats-tui/internal/app/objectstore"
+	"github.com/fd1az/nats-tui/internal/app/objectstore"
 )
 
 func objectDigest(value []byte) string {

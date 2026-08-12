@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/clcsolutions/nats-tui/internal/app/subjects"
-	"github.com/clcsolutions/nats-tui/internal/config"
+	"github.com/fd1az/nats-tui/internal/app/subjects"
+	"github.com/fd1az/nats-tui/internal/config"
 )
 
 type subjectExplorerStub struct{ nodes []subjects.Node }

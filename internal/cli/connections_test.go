@@ -3,8 +3,8 @@ package cli
 import (
 	"bytes"
 	"context"
-	app "github.com/clcsolutions/nats-tui/internal/app/connections"
-	"github.com/clcsolutions/nats-tui/internal/config"
+	app "github.com/fd1az/nats-tui/internal/app/connections"
+	"github.com/fd1az/nats-tui/internal/config"
 	"testing"
 )
 

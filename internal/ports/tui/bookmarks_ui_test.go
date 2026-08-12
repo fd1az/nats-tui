@@ -2,8 +2,8 @@ package tui
 
 import (
 	tea "github.com/charmbracelet/bubbletea"
-	app "github.com/clcsolutions/nats-tui/internal/app/bookmarks"
-	"github.com/clcsolutions/nats-tui/internal/app/streams"
+	app "github.com/fd1az/nats-tui/internal/app/bookmarks"
+	"github.com/fd1az/nats-tui/internal/app/streams"
 	"strings"
 	"testing"
 )

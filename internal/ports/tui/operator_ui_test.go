@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	app "github.com/clcsolutions/nats-tui/internal/app/operator"
-	domain "github.com/clcsolutions/nats-tui/internal/domain/authority"
+	app "github.com/fd1az/nats-tui/internal/app/operator"
+	domain "github.com/fd1az/nats-tui/internal/domain/authority"
 )
 
 func TestOperatorViewShowsCapabilitiesAndAccountDetails(t *testing.T) {

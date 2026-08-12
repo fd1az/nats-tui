@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/clcsolutions/nats-tui/internal/adapters/localfiles"
-	"github.com/clcsolutions/nats-tui/internal/app/messages"
-	"github.com/clcsolutions/nats-tui/internal/config"
+	"github.com/fd1az/nats-tui/internal/adapters/localfiles"
+	"github.com/fd1az/nats-tui/internal/app/messages"
+	"github.com/fd1az/nats-tui/internal/config"
 )
 
 // BrowseMessageHistory executes the message history query through the

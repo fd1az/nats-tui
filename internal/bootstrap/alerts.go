@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/clcsolutions/nats-tui/internal/adapters/alertnotify"
-	app "github.com/clcsolutions/nats-tui/internal/app/alerts"
-	"github.com/clcsolutions/nats-tui/internal/config"
+	"github.com/fd1az/nats-tui/internal/adapters/alertnotify"
+	app "github.com/fd1az/nats-tui/internal/app/alerts"
+	"github.com/fd1az/nats-tui/internal/config"
 )
 
 func (r Runner) alertStore(profile string) alertStore {

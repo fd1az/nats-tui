@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/clcsolutions/nats-tui/internal/app/objectstore"
+	"github.com/fd1az/nats-tui/internal/app/objectstore"
 )
 
 type ReadFile interface {

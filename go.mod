@@ -1,4 +1,4 @@
-module github.com/clcsolutions/nats-tui
+module github.com/fd1az/nats-tui
 
 go 1.26.0
 

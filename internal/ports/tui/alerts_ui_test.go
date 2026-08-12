@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	app "github.com/clcsolutions/nats-tui/internal/app/alerts"
-	"github.com/clcsolutions/nats-tui/internal/app/streams"
+	app "github.com/fd1az/nats-tui/internal/app/alerts"
+	"github.com/fd1az/nats-tui/internal/app/streams"
 )
 
 func TestAlertsViewIsResponsiveAndUsesNoBackgroundColor(t *testing.T) {

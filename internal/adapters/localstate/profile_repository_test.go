@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	domain "github.com/clcsolutions/nats-tui/internal/domain/connection"
+	domain "github.com/fd1az/nats-tui/internal/domain/connection"
 )
 
 func TestProfileRepositoryRoundTripAndDelete(t *testing.T) {

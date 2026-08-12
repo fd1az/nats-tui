@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	domain "github.com/clcsolutions/nats-tui/internal/domain/commandbar"
+	domain "github.com/fd1az/nats-tui/internal/domain/commandbar"
 )
 
 func TestCommandBarRepositoryRoundTripAndBoundsHistory(t *testing.T) {

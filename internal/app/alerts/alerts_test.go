@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	domain "github.com/clcsolutions/nats-tui/internal/domain/alerts"
+	domain "github.com/fd1az/nats-tui/internal/domain/alerts"
 )
 
 type memoryAlertRepository struct{ alerts map[string]*domain.Alert }

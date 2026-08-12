@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/clcsolutions/nats-tui/internal/app/consumers"
-	"github.com/clcsolutions/nats-tui/internal/config"
+	"github.com/fd1az/nats-tui/internal/app/consumers"
+	"github.com/fd1az/nats-tui/internal/config"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"

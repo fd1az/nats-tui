@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	domain "github.com/clcsolutions/nats-tui/internal/domain/alerts"
+	domain "github.com/fd1az/nats-tui/internal/domain/alerts"
 )
 
 type CreateRule struct {

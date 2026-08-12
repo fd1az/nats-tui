@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	app "github.com/clcsolutions/nats-tui/internal/app/connections"
-	domain "github.com/clcsolutions/nats-tui/internal/domain/connection"
+	app "github.com/fd1az/nats-tui/internal/app/connections"
+	domain "github.com/fd1az/nats-tui/internal/domain/connection"
 )
 
 type ProfileRepository struct {

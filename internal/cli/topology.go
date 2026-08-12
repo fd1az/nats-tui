@@ -8,9 +8,9 @@ import (
 	"io"
 	"strings"
 
-	app "github.com/clcsolutions/nats-tui/internal/app/topology"
-	"github.com/clcsolutions/nats-tui/internal/config"
-	domain "github.com/clcsolutions/nats-tui/internal/domain/topology"
+	app "github.com/fd1az/nats-tui/internal/app/topology"
+	"github.com/fd1az/nats-tui/internal/config"
+	domain "github.com/fd1az/nats-tui/internal/domain/topology"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )

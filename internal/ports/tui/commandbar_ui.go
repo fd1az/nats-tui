@@ -8,10 +8,10 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	app "github.com/clcsolutions/nats-tui/internal/app/commandbar"
-	"github.com/clcsolutions/nats-tui/internal/app/consumers"
-	domain "github.com/clcsolutions/nats-tui/internal/domain/commandbar"
-	domainrequestreply "github.com/clcsolutions/nats-tui/internal/domain/requestreply"
+	app "github.com/fd1az/nats-tui/internal/app/commandbar"
+	"github.com/fd1az/nats-tui/internal/app/consumers"
+	domain "github.com/fd1az/nats-tui/internal/domain/commandbar"
+	domainrequestreply "github.com/fd1az/nats-tui/internal/domain/requestreply"
 )
 
 type CommandBarServices struct {

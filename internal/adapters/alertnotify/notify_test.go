@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	app "github.com/clcsolutions/nats-tui/internal/app/alerts"
+	app "github.com/fd1az/nats-tui/internal/app/alerts"
 )
 
 type doerFunc func(*http.Request) (*http.Response, error)

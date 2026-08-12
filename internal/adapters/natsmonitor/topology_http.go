@@ -10,9 +10,9 @@ import (
 	"net/url"
 	"strings"
 
-	appconnections "github.com/clcsolutions/nats-tui/internal/app/connections"
-	appoperator "github.com/clcsolutions/nats-tui/internal/app/operator"
-	domain "github.com/clcsolutions/nats-tui/internal/domain/topology"
+	appconnections "github.com/fd1az/nats-tui/internal/app/connections"
+	appoperator "github.com/fd1az/nats-tui/internal/app/operator"
+	domain "github.com/fd1az/nats-tui/internal/domain/topology"
 )
 
 const maxMonitoringResponse = 16 << 20

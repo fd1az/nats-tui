@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/clcsolutions/nats-tui/internal/app/kvstore"
-	"github.com/clcsolutions/nats-tui/internal/app/objectstore"
-	"github.com/clcsolutions/nats-tui/internal/config"
+	"github.com/fd1az/nats-tui/internal/app/kvstore"
+	"github.com/fd1az/nats-tui/internal/app/objectstore"
+	"github.com/fd1az/nats-tui/internal/config"
 )
 
 func TestVersionCommandWritesBuildInformation(t *testing.T) {

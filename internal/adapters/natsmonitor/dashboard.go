@@ -3,7 +3,7 @@ package natsmonitor
 import (
 	"context"
 
-	"github.com/clcsolutions/nats-tui/internal/app/dashboard"
+	"github.com/fd1az/nats-tui/internal/app/dashboard"
 )
 
 func aggregateDashboardRuntime(responses []statsResponse) dashboard.Runtime {

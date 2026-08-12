@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	domain "github.com/clcsolutions/nats-tui/internal/domain/authority"
+	domain "github.com/fd1az/nats-tui/internal/domain/authority"
 	jwt "github.com/nats-io/jwt/v2"
 	"github.com/nats-io/nkeys"
 )

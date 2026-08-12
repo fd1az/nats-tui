@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	app "github.com/clcsolutions/nats-tui/internal/app/bookmarks"
-	domain "github.com/clcsolutions/nats-tui/internal/domain/bookmarks"
+	app "github.com/fd1az/nats-tui/internal/app/bookmarks"
+	domain "github.com/fd1az/nats-tui/internal/domain/bookmarks"
 )
 
 type BookmarkRepository struct {

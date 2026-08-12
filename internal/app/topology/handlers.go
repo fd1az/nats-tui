@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	domain "github.com/clcsolutions/nats-tui/internal/domain/topology"
+	domain "github.com/fd1az/nats-tui/internal/domain/topology"
 )
 
 var (

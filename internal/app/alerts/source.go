@@ -3,7 +3,7 @@ package alerts
 import (
 	"context"
 
-	domain "github.com/clcsolutions/nats-tui/internal/domain/alerts"
+	domain "github.com/fd1az/nats-tui/internal/domain/alerts"
 )
 
 // AdvisorySource is the driven port for the external NATS event stream.

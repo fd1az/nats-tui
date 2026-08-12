@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/clcsolutions/nats-tui/internal/app/dashboard"
+	"github.com/fd1az/nats-tui/internal/app/dashboard"
 )
 
 func TestDashboardRepositoryPersistsAndReplacesPanels(t *testing.T) {

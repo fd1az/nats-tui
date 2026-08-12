@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	app "github.com/clcsolutions/nats-tui/internal/app/commandbar"
-	domain "github.com/clcsolutions/nats-tui/internal/domain/commandbar"
+	app "github.com/fd1az/nats-tui/internal/app/commandbar"
+	domain "github.com/fd1az/nats-tui/internal/domain/commandbar"
 )
 
 type CommandBarRepository struct {

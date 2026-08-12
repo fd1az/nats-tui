@@ -6,7 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	app "github.com/clcsolutions/nats-tui/internal/app/connections"
+	app "github.com/fd1az/nats-tui/internal/app/connections"
 )
 
 type ProfileServices struct{ Load func() tea.Cmd }

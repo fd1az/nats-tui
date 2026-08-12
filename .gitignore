@@ -1,4 +1,5 @@
 .reference/
 bin/
+dist/
 coverage.out
 *.log

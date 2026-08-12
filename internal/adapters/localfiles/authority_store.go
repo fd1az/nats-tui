@@ -8,7 +8,7 @@ import (
 	"strings"
 	"unicode"
 
-	app "github.com/clcsolutions/nats-tui/internal/app/operator"
+	app "github.com/fd1az/nats-tui/internal/app/operator"
 	jwt "github.com/nats-io/jwt/v2"
 )
 

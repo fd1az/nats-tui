@@ -3,11 +3,11 @@ package bootstrap
 import (
 	"context"
 
-	"github.com/clcsolutions/nats-tui/internal/app/consumers"
-	"github.com/clcsolutions/nats-tui/internal/app/operator"
-	"github.com/clcsolutions/nats-tui/internal/app/streams"
-	"github.com/clcsolutions/nats-tui/internal/app/subjects"
-	"github.com/clcsolutions/nats-tui/internal/config"
+	"github.com/fd1az/nats-tui/internal/app/consumers"
+	"github.com/fd1az/nats-tui/internal/app/operator"
+	"github.com/fd1az/nats-tui/internal/app/streams"
+	"github.com/fd1az/nats-tui/internal/app/subjects"
+	"github.com/fd1az/nats-tui/internal/config"
 )
 
 // ExploreSubjects builds the same read model used by the TUI for non-

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	domain "github.com/clcsolutions/nats-tui/internal/domain/topology"
+	domain "github.com/fd1az/nats-tui/internal/domain/topology"
 )
 
 type stubSource struct {

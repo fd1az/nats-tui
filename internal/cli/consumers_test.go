@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/clcsolutions/nats-tui/internal/app/consumers"
-	"github.com/clcsolutions/nats-tui/internal/config"
+	"github.com/fd1az/nats-tui/internal/app/consumers"
+	"github.com/fd1az/nats-tui/internal/config"
 )
 
 type consumerManagerStub struct {

@@ -3,8 +3,8 @@ package bootstrap
 import (
 	"context"
 
-	"github.com/clcsolutions/nats-tui/internal/app/dashboard"
-	"github.com/clcsolutions/nats-tui/internal/config"
+	"github.com/fd1az/nats-tui/internal/app/dashboard"
+	"github.com/fd1az/nats-tui/internal/config"
 )
 
 func (r Runner) dashboardPanels(settings config.Settings) dashboard.PanelService {

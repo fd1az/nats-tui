@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	domain "github.com/clcsolutions/nats-tui/internal/domain/connection"
+	domain "github.com/fd1az/nats-tui/internal/domain/connection"
 )
 
 type profileMemory struct{ values map[string]domain.Profile }

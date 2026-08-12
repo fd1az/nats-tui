@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	domain "github.com/clcsolutions/nats-tui/internal/domain/alerts"
+	domain "github.com/fd1az/nats-tui/internal/domain/alerts"
 )
 
 func TestManageRulesUsesConstructorsAndRepository(t *testing.T) {

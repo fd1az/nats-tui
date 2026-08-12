@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	app "github.com/clcsolutions/nats-tui/internal/app/connections"
+	app "github.com/fd1az/nats-tui/internal/app/connections"
 	"github.com/spf13/cobra"
 )
 
