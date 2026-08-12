@@ -30,6 +30,14 @@ type Settings struct {
 	AuthorityDir  string
 	OperatorSeed  string
 	Refresh       time.Duration
+	Mouse         bool
+	Theme         string
+	KeyQuit       string
+	KeyHelp       string
+	KeyRefresh    string
+	KeyCommands   string
+	KeyBookmarks  string
+	KeyActivity   string
 }
 
 func Configure(v *viper.Viper, configFile string) error {
@@ -79,5 +87,13 @@ func Load(v *viper.Viper) Settings {
 		AuthorityDir:  v.GetString("authority-dir"),
 		OperatorSeed:  v.GetString("authority-operator-seed"),
 		Refresh:       v.GetDuration("refresh"),
+		Mouse:         v.GetBool("mouse"),
+		Theme:         v.GetString("theme"),
+		KeyQuit:       v.GetString("key-quit"),
+		KeyHelp:       v.GetString("key-help"),
+		KeyRefresh:    v.GetString("key-refresh"),
+		KeyCommands:   v.GetString("key-commands"),
+		KeyBookmarks:  v.GetString("key-bookmarks"),
+		KeyActivity:   v.GetString("key-activity"),
 	}
 }

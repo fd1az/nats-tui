@@ -26,10 +26,10 @@ application and adapter boundaries.
 - [x] Periodic refresh with timeouts, retry state, and stale-result rejection.
 - [x] Direct unauthenticated NATS URL connection.
 - [x] Token and credentials-file CLI options.
-- [ ] Contextual notifications/toasts with an inspectable error log.
-- [ ] Configurable key bindings.
-- [ ] Mouse support as an optional enhancement.
-- [ ] Accessibility and reduced-color theme.
+- [x] Contextual notifications/toasts with an inspectable error log.
+- [x] Configurable key bindings.
+- [x] Mouse support as an optional enhancement.
+- [x] Accessibility and reduced-color theme.
 - [ ] Capability discovery based on server version, account permissions, and enabled APIs.
 - [ ] Read-only safety mode.
 - [ ] Destructive-operation audit log.
@@ -289,7 +289,7 @@ required system-account and decentralized-authentication APIs.
 - [x] Race-detector verification.
 - [x] Architecture dependency test.
 - [x] ANSI background and reverse-video regression test.
-- [ ] End-to-end terminal interaction tests.
+- [x] End-to-end terminal interaction tests.
 - [ ] Compatibility test matrix across supported NATS versions.
 - [ ] Permission-restricted account test fixtures.
 - [ ] Large-account performance benchmarks.

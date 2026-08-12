@@ -273,8 +273,16 @@ func NewRoot(deps Dependencies) *cobra.Command {
 	flags.String("authority-dir", "", "private directory for locally managed account and user credentials")
 	flags.String("authority-operator-seed", "", "operator seed file enabling account mutations")
 	flags.Duration("refresh", 2*time.Second, "dashboard refresh interval")
+	flags.Bool("mouse", false, "enable terminal mouse navigation and scrolling")
+	flags.String("theme", "midnight", "color theme: midnight, accessible, or mono")
+	flags.String("key-quit", "q", "global quit key")
+	flags.String("key-help", "?", "global help key")
+	flags.String("key-refresh", "r", "global refresh key")
+	flags.String("key-commands", ":", "global command bar key")
+	flags.String("key-bookmarks", "b", "global bookmarks key")
+	flags.String("key-activity", "ctrl+g", "global activity log key")
 
-	for _, name := range []string{"profile", "server", "monitor-url", "credentials", "token", "username", "password", "nkey-seed", "user-jwt", "user-seed", "tls-ca", "tls-cert", "tls-key", "tls-server-name", "tls-insecure", "authority-dir", "authority-operator-seed", "refresh"} {
+	for _, name := range []string{"profile", "server", "monitor-url", "credentials", "token", "username", "password", "nkey-seed", "user-jwt", "user-seed", "tls-ca", "tls-cert", "tls-key", "tls-server-name", "tls-insecure", "authority-dir", "authority-operator-seed", "refresh", "mouse", "theme", "key-quit", "key-help", "key-refresh", "key-commands", "key-bookmarks", "key-activity"} {
 		if err := values.BindPFlag(name, flags.Lookup(name)); err != nil {
 			panic(fmt.Sprintf("bind flag %s: %v", name, err))
 		}

@@ -28,6 +28,7 @@ import (
 	"github.com/clcsolutions/nats-tui/internal/app/messages"
 	"github.com/clcsolutions/nats-tui/internal/app/objectstore"
 	"github.com/clcsolutions/nats-tui/internal/app/operator"
+	"github.com/clcsolutions/nats-tui/internal/app/preferences"
 	"github.com/clcsolutions/nats-tui/internal/app/requestreply"
 	"github.com/clcsolutions/nats-tui/internal/app/streams"
 	"github.com/clcsolutions/nats-tui/internal/app/subjects"
@@ -897,6 +898,13 @@ type workspaceState struct {
 }
 
 func (r Runner) Run(ctx context.Context, settings config.Settings) error {
+	uxPreferences, err := preferences.New(settings.Mouse, settings.Theme, preferences.Bindings{
+		Quit: settings.KeyQuit, Help: settings.KeyHelp, Refresh: settings.KeyRefresh,
+		Commands: settings.KeyCommands, Bookmarks: settings.KeyBookmarks, Activity: settings.KeyActivity,
+	})
+	if err != nil {
+		return fmt.Errorf("configure terminal UX: %w", err)
+	}
 	sessions := &sessionStore{objectFiles: r.objectTransfer(), streamArchive: r.streamArchive()}
 	defer sessions.Close()
 	var alertCancel context.CancelFunc
@@ -1958,8 +1966,12 @@ func (r Runner) Run(ctx context.Context, settings config.Settings) error {
 	}, Ack: ackAlert, AckAll: ackAllAlerts, Scan: scanAlerts})
 	model = model.WithCommandBar(tui.CommandBarServices{Load: loadCommandBar, Record: recordCommand})
 	model = model.WithBookmarks(tui.BookmarkServices{Load: loadBookmarks, Add: addBookmark, Remove: removeBookmark, SaveSearch: saveSearch})
-	model = model.WithDashboard(tui.DashboardServices{Load: loadDashboardPanels})
-	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithContext(ctx))
+	model = model.WithDashboard(tui.DashboardServices{Load: loadDashboardPanels}).WithUX(uxPreferences)
+	programOptions := []tea.ProgramOption{tea.WithAltScreen(), tea.WithContext(ctx)}
+	if uxPreferences.Mouse {
+		programOptions = append(programOptions, tea.WithMouseCellMotion())
+	}
+	program := tea.NewProgram(model, programOptions...)
 	if _, err := program.Run(); err != nil {
 		return fmt.Errorf("run terminal UI: %w", err)
 	}

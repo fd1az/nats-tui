@@ -27,3 +27,16 @@ func midnight() theme {
 		red:       lipgloss.Color("#F07178"),
 	}
 }
+
+func accessible() theme {
+	return theme{
+		border: lipgloss.Color("#8A8A8A"), primary: lipgloss.Color("#FFFFFF"), secondary: lipgloss.Color("#D7D7D7"),
+		muted: lipgloss.Color("#AFAFAF"), accent: lipgloss.Color("#5FD7FF"), cyan: lipgloss.Color("#00FFFF"),
+		mint: lipgloss.Color("#5FFF87"), yellow: lipgloss.Color("#FFFF00"), red: lipgloss.Color("#FF5F5F"),
+	}
+}
+
+func monochrome() theme {
+	white, gray, dark := lipgloss.Color("#FFFFFF"), lipgloss.Color("#BFBFBF"), lipgloss.Color("#777777")
+	return theme{border: dark, primary: white, secondary: gray, muted: dark, accent: white, cyan: white, mint: white, yellow: gray, red: white}
+}

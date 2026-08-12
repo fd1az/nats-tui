@@ -501,6 +501,21 @@ type stubRunner struct {
 	settings config.Settings
 }
 
+func TestRootPassesUXSettingsToRunner(t *testing.T) {
+	t.Parallel()
+	runner := &stubRunner{}
+	root := NewRoot(Dependencies{Runner: runner})
+	root.SetOut(new(bytes.Buffer))
+	root.SetErr(new(bytes.Buffer))
+	root.SetArgs([]string{"--mouse", "--theme", "accessible", "--key-help", "h", "--key-activity", "ctrl+a"})
+	if err := root.ExecuteContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !runner.settings.Mouse || runner.settings.Theme != "accessible" || runner.settings.KeyHelp != "h" || runner.settings.KeyActivity != "ctrl+a" {
+		t.Fatalf("settings = %#v", runner.settings)
+	}
+}
+
 type stubKeyValueCreator struct {
 	settings   config.Settings
 	definition kvstore.Definition

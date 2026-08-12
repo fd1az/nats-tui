@@ -135,6 +135,26 @@ Press r to refresh immediately. Refresh calls have a three-second timeout and do
 not overlap. Failures retain the last good snapshot, show `Stale · retrying`, and
 retry after two seconds. Results from an old connection generation are ignored.
 
+Terminal UX is configurable from flags, environment variables, or `config.yaml`.
+Mouse mode is opt-in so normal terminal text selection remains untouched. When
+enabled, click tabs and list rows, double-click resources to open them, use the
+wheel to navigate or scroll, and use mouse back/forward as Escape/Enter:
+
+    nats-tui --mouse
+    nats-tui --theme accessible
+    nats-tui --theme mono
+    nats-tui --key-help h --key-refresh R --key-activity ctrl+a
+
+Themes never emit ANSI background colors. `accessible` raises contrast and
+`mono` removes semantic color dependence. Successful operations and errors
+appear as foreground-only toasts; press `Ctrl+G` (configurable) for the bounded,
+inspectable session activity log and `d` to clear it.
+
+Terminal interaction tests drive the real Bubble Tea input parser and renderer,
+including raw SGR mouse sequences:
+
+    make test-e2e
+
 The Streams workspace supports full inspection and safe management. Enter opens
 stream detail, m opens its message monitor, n creates a stream, e edits the
 selected stream, and d opens destructive delete confirmation. Forms expose name,

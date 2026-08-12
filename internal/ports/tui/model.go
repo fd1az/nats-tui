@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/clcsolutions/nats-tui/internal/app/activity"
 	appalerts "github.com/clcsolutions/nats-tui/internal/app/alerts"
 	appbookmarks "github.com/clcsolutions/nats-tui/internal/app/bookmarks"
 	appcommandbar "github.com/clcsolutions/nats-tui/internal/app/commandbar"
@@ -23,6 +24,7 @@ import (
 	"github.com/clcsolutions/nats-tui/internal/app/kvstore"
 	"github.com/clcsolutions/nats-tui/internal/app/messages"
 	"github.com/clcsolutions/nats-tui/internal/app/objectstore"
+	"github.com/clcsolutions/nats-tui/internal/app/preferences"
 	"github.com/clcsolutions/nats-tui/internal/app/streams"
 	"github.com/clcsolutions/nats-tui/internal/app/subjects"
 	domainrequestreply "github.com/clcsolutions/nats-tui/internal/domain/requestreply"
@@ -183,6 +185,7 @@ type Model struct {
 	dashboardTimeline            *dashboard.Timeline
 	dashboardPanels              []dashboard.Panel
 	dashboardServices            DashboardServices
+	ux                           uxState
 	connect                      ConnectFunc
 	loadMessages                 LoadMessagesFunc
 	loadMessageHistory           LoadMessageHistoryFunc
@@ -621,6 +624,7 @@ func NewModel(profile, server string, connect ConnectFunc, loaders ...LoadMessag
 		messageInspectionMode: messages.InspectAuto,
 		subjectTraffic:        subjects.NewTrafficTracker(subjects.DefaultTrafficWindow),
 		dashboardTimeline:     dashboard.NewTimeline(dashboard.DefaultSampleLimit),
+		ux:                    uxState{preferences: defaultPreferences(), activity: activity.NewLog(200)},
 	}
 	if len(loaders) > 0 {
 		model.loadMessages = loaders[0]
@@ -992,6 +996,11 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
+	if err := failureFromMessage(message); err != nil {
+		m.notify(activity.Error, "Operation failed", err.Error())
+	} else if title := successFromMessage(message); title != "" {
+		m.notify(activity.Success, title, "")
+	}
 	if key, ok := message.(tea.KeyMsg); ok && key.String() == "ctrl+c" {
 		return m, tea.Quit
 	}
@@ -1002,7 +1011,10 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.serverInput.Width = max(min(msg.Width-18, 68), 20)
 	case welcomeDoneMsg:
-		return m.showConnection()
+		if m.screen == screenWelcome {
+			return m.showConnection()
+		}
+		return m, nil
 	case connectedMsg:
 		m.profile = msg.profile
 		m.dashboardTimeline.Reset()
@@ -2003,16 +2015,26 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	beforeError := m.currentErrorText()
+	var next tea.Model
+	var command tea.Cmd
 	switch m.screen {
 	case screenWelcome:
-		return m.updateWelcome(message)
+		next, command = m.updateWelcome(message)
 	case screenConnection:
-		return m.updateConnection(message)
+		next, command = m.updateConnection(message)
 	case screenConnecting:
-		return m.updateConnecting(message)
+		next, command = m.updateConnecting(message)
 	default:
-		return m.updateWorkspace(message)
+		next, command = m.updateWorkspace(message)
 	}
+	if updated, ok := next.(Model); ok {
+		if afterError := updated.currentErrorText(); afterError != "" && afterError != beforeError {
+			updated.notify(activity.Error, "Operation failed", afterError)
+		}
+		return updated, command
+	}
+	return next, command
 }
 
 func (m Model) updateWelcome(message tea.Msg) (tea.Model, tea.Cmd) {
@@ -2065,6 +2087,9 @@ func (m Model) updateConnecting(message tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateWorkspace(message tea.Msg) (tea.Model, tea.Cmd) {
+	if mouse, ok := message.(tea.MouseMsg); ok {
+		return m.updateMouse(mouse)
+	}
 	key, ok := message.(tea.KeyMsg)
 	if !ok {
 		if m.loadingMessages || m.watchStarting || m.refreshing || m.streamTransferStarting || m.streamTransferActive || m.keyValueEntrySaving || m.loadingKeyValueHistory || m.loadingKeyValueKeys || m.loadingKeyValueEntry || m.keyValueWatchStarting || m.loadingObjects || m.objectWatchStarting || m.objectBucketOperationRunning || m.requestReply.running || m.requestReply.loadingState || m.topology.loading || m.connections.loading || m.operator.loading || m.operator.running || m.alerts.loading || m.bookmarks.loading {
@@ -2077,10 +2102,13 @@ func (m Model) updateWorkspace(message tea.Msg) (tea.Model, tea.Cmd) {
 	if m.commandBar.open {
 		return m.updateCommandBar(key)
 	}
+	if m.ux.open {
+		return m.updateActivity(key)
+	}
 	if m.bookmarks.open {
 		return m.updateBookmarks(key)
 	}
-	if key.String() == "ctrl+k" || (key.String() == ":" && m.activeWorkspace != 7 && !m.editingForm()) {
+	if key.String() == "ctrl+k" || (key.String() == m.ux.preferences.Keys.Commands && m.activeWorkspace != 7 && !m.editingForm()) {
 		m.openCommandBar(commandPalette)
 		return m, nil
 	}
@@ -2233,7 +2261,7 @@ func (m Model) updateWorkspace(message tea.Msg) (tea.Model, tea.Cmd) {
 	if m.activeWorkspace == 4 && (m.showKeyValueHistory || m.keyValueHistoryErr != nil) {
 		return m.updateKeyValueHistoryNavigation(key)
 	}
-	if key.String() == ":" {
+	if key.String() == m.ux.preferences.Keys.Commands {
 		m.openCommandBar(commandPalette)
 		return m, nil
 	}
@@ -2244,7 +2272,7 @@ func (m Model) updateWorkspace(message tea.Msg) (tea.Model, tea.Cmd) {
 	if key.String() == "B" {
 		return m.toggleBookmark()
 	}
-	if key.String() == "b" {
+	if key.String() == m.ux.preferences.Keys.Bookmarks {
 		m.bookmarks.open = true
 		m.bookmarks.notice = ""
 		if m.bookmarkServices.Load != nil {
@@ -2291,11 +2319,13 @@ func (m Model) updateWorkspace(message tea.Msg) (tea.Model, tea.Cmd) {
 		if m.showConsumerDetail {
 			m.showConsumerDetail = false
 		}
-	case "q":
+	case m.ux.preferences.Keys.Quit:
 		return m, tea.Quit
-	case "?":
+	case m.ux.preferences.Keys.Help:
 		m.showHelp = !m.showHelp
-	case "r":
+	case m.ux.preferences.Keys.Activity:
+		m.ux.open = true
+	case m.ux.preferences.Keys.Refresh:
 		if m.activeWorkspace == 5 && m.browsingObjects && m.loadObjects != nil {
 			m.loadingObjects = true
 			m.objectsErr = nil
@@ -3417,6 +3447,9 @@ func (m Model) centeredCanvas(width, height int, content string) string {
 }
 
 func (m Model) workspaceView(width, height int) string {
+	if m.ux.open {
+		return m.activityView(width, height)
+	}
 	if m.bookmarks.open {
 		return m.bookmarksView(width, height)
 	}
@@ -3478,9 +3511,14 @@ func (m Model) workspaceView(width, height int) string {
 	tabs := m.workspaceTabs(contentWidth)
 	contentAvailable := max(contentHeight-lipgloss.Height(header)-lipgloss.Height(tabs)-4, 1)
 	content := m.workspaceContent(contentWidth, contentAvailable)
+	content = cropLines(content, contentAvailable)
+	footerText := workspaceFooter(contentWidth, m.ux.preferences.Keys)
+	if toast := m.toastView(contentWidth); toast != "" {
+		footerText = toast + "\n" + footerText
+	}
 	footer := lipgloss.NewStyle().
 		Foreground(m.theme.muted).
-		Render(workspaceFooter(contentWidth))
+		Render(footerText)
 
 	top := strings.Join([]string{header, tabs, "", content}, "\n")
 	availableGap := max(contentHeight-lipgloss.Height(top)-lipgloss.Height(footer), 0)
@@ -3494,14 +3532,25 @@ func (m Model) workspaceView(width, height int) string {
 		Render(body)
 }
 
-func workspaceFooter(width int) string {
+func cropLines(value string, height int) string {
+	if height < 1 {
+		return ""
+	}
+	lines := strings.Split(value, "\n")
+	if len(lines) <= height {
+		return value
+	}
+	return strings.Join(lines[:height], "\n")
+}
+
+func workspaceFooter(width int, keys preferences.Bindings) string {
 	switch {
 	case width >= 104:
-		return ": commands   B save   b bookmarks   ←/→ navigate   r refresh   c profiles   ? help   q quit"
+		return fmt.Sprintf("%s commands   B save   %s bookmarks   ←/→ navigate   %s refresh   %s activity   c profiles   %s help   %s quit", keys.Commands, keys.Bookmarks, keys.Refresh, keys.Activity, keys.Help, keys.Quit)
 	case width >= 66:
-		return ": cmd   B save   b list   ←/→ navigate   r refresh   ? help   q quit"
+		return fmt.Sprintf("%s cmd   B save   %s list   ←/→ nav   %s refresh   %s log   %s help   %s quit", keys.Commands, keys.Bookmarks, keys.Refresh, keys.Activity, keys.Help, keys.Quit)
 	default:
-		return ": cmd   B save   b list   ? help   q quit"
+		return fmt.Sprintf("%s cmd   %s list   %s log   %s help   %s quit", keys.Commands, keys.Bookmarks, keys.Activity, keys.Help, keys.Quit)
 	}
 }
 
@@ -4499,7 +4548,11 @@ func (m Model) card(label, value, caption string, color lipgloss.Color, width in
 
 func (m Model) helpView(width, height int) string {
 	title := lipgloss.NewStyle().Bold(true).Foreground(m.theme.accent).Render("Keyboard")
-	keys := "  ?         close help\n  q         quit\n  ←/→       switch workspace\n  ↑/↓ j/k   move or scroll\n  pgup/dn   jump through lists\n  g/G       first/last item (g toggles topology graph)\n  enter     open selected item\n  esc       close detail/search; Publish returns to Dashboard\n  1-9/0/A/! jump workspace outside text editors\n  r         refresh now\n  c         connection profiles\n  /         reactive search\n  w         start/stop live watch\n  space     pause/resume live watch\n  p         pause/resume consumer\n  x         reset consumer / close client\n  n         new stream/KV/object bucket\n  e         edit selected resource\n  m         stream messages\n  d         delete selected resource\n  :/ctrl+k  command bar\n  ctrl+r    command history\n  B         toggle bookmark\n  b         open bookmarks"
+	binding := m.ux.preferences.Keys
+	keys := fmt.Sprintf("  %-9s close help\n  %-9s quit\n  ←/→       switch workspace\n  ↑/↓ j/k   move or scroll\n  pgup/dn   jump through lists\n  g/G       first/last item (g toggles topology graph)\n  enter     open selected item\n  esc       close detail/search; Publish returns to Dashboard\n  1-9/0/A/! jump workspace outside text editors\n  %-9s refresh now\n  %-9s activity & error log\n  c         connection profiles\n  /         reactive search\n  w         start/stop live watch\n  space     pause/resume live watch\n  p         pause/resume consumer\n  x         reset consumer / close client\n  n         new stream/KV/object bucket\n  e         edit selected resource\n  m         stream messages\n  d         delete selected resource\n  %s/ctrl+k command bar\n  ctrl+r    command history\n  B         toggle bookmark\n  %-9s open bookmarks", binding.Help, binding.Quit, binding.Refresh, binding.Activity, binding.Commands, binding.Bookmarks)
+	if m.ux.preferences.Mouse {
+		keys += "\n\n  mouse     click select · double-click open · wheel scroll · back/forward"
+	}
 	return lipgloss.NewStyle().
 		Width(max(width-8, 1)).
 		Height(max(height-4, 1)).
