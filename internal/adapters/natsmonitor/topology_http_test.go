@@ -13,7 +13,7 @@ func (monitoringDoer) Do(request *http.Request) (*http.Response, error) {
 	body := `{}`
 	switch request.URL.Path {
 	case "/varz":
-		body = `{"server_id":"A","server_name":"nats-a","version":"2.14.4","host":"127.0.0.1","port":4222,"connections":3,"subscriptions":7,"cluster":{"name":"C1"},"jetstream":{"config":{"domain":"edge"}}}`
+		body = `{"server_id":"A","server_name":"nats-a","version":"2.14.4","host":"127.0.0.1","port":4222,"start":"2026-08-12T10:00:00Z","cpu":12.5,"mem":2048,"connections":3,"subscriptions":7,"slow_consumers":1,"stale_connections":2,"stalled_clients":3,"cores":8,"gomaxprocs":4,"num_goroutines":42,"in_msgs":100,"out_msgs":50,"in_bytes":1000,"out_bytes":500,"cluster":{"name":"C1"},"jetstream":{"config":{"domain":"edge"}}}`
 	case "/routez":
 		body = `{"routes":[{"remote_id":"B","remote_name":"nats-b","rtt":"1ms"}]}`
 	case "/gatewayz":

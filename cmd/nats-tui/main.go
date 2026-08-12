@@ -61,6 +61,7 @@ func main() {
 		Alerts:                 runner,
 		Commands:               runner,
 		Bookmarks:              runner,
+		Dashboard:              runner,
 		Version: cli.BuildInfo{
 			Version: version,
 			Commit:  commit,

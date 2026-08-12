@@ -52,19 +52,19 @@ application and adapter boundaries.
 - [x] Import profiles from NATS CLI contexts.
 - [x] Export sanitized profile configuration.
 
-## Dashboard and Real-Time Metrics — Partial
+## Dashboard and Real-Time Metrics — Complete
 
 - [x] Server name, version, and cluster summary.
 - [x] Account messages, storage, streams, and consumers.
 - [x] Automatic and manual refresh.
 - [x] Connected, refreshing, and stale states.
-- [ ] Message and byte rates over time.
-- [ ] Memory versus file storage breakdown.
-- [ ] JetStream account limits and utilization percentages.
-- [ ] Slow-consumer and connection health summary.
-- [ ] Server CPU, memory, goroutines, uptime, and traffic.
-- [ ] Historical sparklines with bounded local sampling.
-- [ ] User-defined dashboard panels.
+- [x] Message and byte rates over time.
+- [x] Memory versus file storage breakdown.
+- [x] JetStream account limits and utilization percentages.
+- [x] Slow-consumer and connection health summary.
+- [x] Server CPU, memory, optional goroutines, uptime, and traffic.
+- [x] Historical sparklines with bounded local sampling.
+- [x] User-defined dashboard panels.
 
 ## Stream Management — Partial
 

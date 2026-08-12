@@ -38,6 +38,7 @@ type Monitor struct {
 	topologyFallback   appTopologySource
 	connectionFallback appConnectionSource
 	operatorFallback   appOperatorSource
+	dashboardFallback  appDashboardSource
 }
 
 type appTopologySource interface {
@@ -48,6 +49,9 @@ type appConnectionSource interface {
 }
 type appOperatorSource interface {
 	OperatorCatalog(context.Context) (appoperator.Catalog, error)
+}
+type appDashboardSource interface {
+	DashboardRuntime(context.Context) (dashboard.Runtime, error)
 }
 
 type Clock interface{ Now() time.Time }
@@ -168,6 +172,7 @@ func ConnectWithClock(settings config.Settings, clock Clock) (*Monitor, error) {
 		monitor.topologyFallback = fallback
 		monitor.connectionFallback = fallback
 		monitor.operatorFallback = fallback
+		monitor.dashboardFallback = fallback
 	}
 	return monitor, nil
 }
@@ -382,16 +387,38 @@ func (m *Monitor) Snapshot(ctx context.Context) (dashboard.Snapshot, error) {
 		return dashboard.Snapshot{}, fmt.Errorf("load JetStream stream state: %w", err)
 	}
 
+	runtime := m.dashboardRuntime(ctx)
 	return dashboard.Snapshot{
-		ServerName: m.connection.ConnectedServerName(),
-		Cluster:    m.connection.ConnectedClusterName(),
-		Version:    m.connection.ConnectedServerVersion(),
-		Streams:    account.Streams,
-		Consumers:  account.Consumers,
-		Messages:   messages,
-		Bytes:      account.Memory + account.Store,
-		ObservedAt: m.now(),
+		ServerName:  m.connection.ConnectedServerName(),
+		Cluster:     m.connection.ConnectedClusterName(),
+		Version:     m.connection.ConnectedServerVersion(),
+		Streams:     account.Streams,
+		Consumers:   account.Consumers,
+		Messages:    messages,
+		Bytes:       account.Memory + account.Store,
+		MemoryBytes: account.Memory,
+		FileBytes:   account.Store,
+		Limits:      dashboard.Limits{MaxMemory: account.Limits.MaxMemory, MaxFile: account.Limits.MaxStore, MaxStreams: account.Limits.MaxStreams, MaxConsumers: account.Limits.MaxConsumers},
+		Runtime:     runtime,
+		ObservedAt:  m.now(),
 	}, nil
+}
+
+func (m *Monitor) dashboardRuntime(ctx context.Context) dashboard.Runtime {
+	queryCtx, cancel := context.WithTimeout(ctx, 650*time.Millisecond)
+	defer cancel()
+	responses, err := m.collectServerStats(queryCtx)
+	if err == nil && len(responses) > 0 {
+		return aggregateDashboardRuntime(responses)
+	}
+	if m.dashboardFallback != nil {
+		fallbackCtx, fallbackCancel := context.WithTimeout(ctx, 650*time.Millisecond)
+		defer fallbackCancel()
+		if runtime, fallbackErr := m.dashboardFallback.DashboardRuntime(fallbackCtx); fallbackErr == nil {
+			return runtime
+		}
+	}
+	return dashboard.Runtime{}
 }
 
 func (m *Monitor) ListStreams(ctx context.Context) ([]streams.Summary, error) {

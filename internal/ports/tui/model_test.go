@@ -1490,6 +1490,28 @@ func TestDashboardMetricsUseOpenPanelsWithoutCardBoxes(t *testing.T) {
 	}
 }
 
+func TestDashboardRendersRatesCapacityRuntimeAndCustomPanels(t *testing.T) {
+	t.Parallel()
+	model := dashboardModel(t, 160, 40)
+	model.snapshot.MemoryBytes, model.snapshot.FileBytes = 4_000_000_000, 10_800_000_000
+	model.snapshot.Limits = dashboard.Limits{MaxMemory: 8_000_000_000, MaxFile: 20_000_000_000, MaxStreams: 24, MaxConsumers: 100}
+	model.snapshot.Runtime = dashboard.Runtime{Available: true, Servers: 2, CPUPercent: 12.5, MemoryBytes: 512_000_000, Goroutines: 42, GoroutinesAvailable: true, StartedAt: model.snapshot.ObservedAt.Add(-time.Hour), Connections: 18, Subscriptions: 90, SlowConsumers: 1, InMessages: 200, OutMessages: 100}
+	model.dashboardTimeline.Reset()
+	previous := model.snapshot
+	previous.ObservedAt = model.snapshot.ObservedAt.Add(-time.Second)
+	previous.Runtime.InMessages = 190
+	previous.Runtime.OutMessages = 95
+	model.dashboardTimeline.Record(previous)
+	model.dashboardTimeline.Record(model.snapshot)
+	model.dashboardPanels = []dashboard.Panel{{ID: "traffic", Title: "Traffic", Metric: dashboard.MetricMessageRate}}
+	view := model.dashboardView(156)
+	for _, expected := range []string{"15.0/s", "MEMORY", "50%", "RUNTIME", "goroutines 42", "CONNECTION HEALTH", "CUSTOM PANELS", "Traffic"} {
+		if !strings.Contains(view, expected) {
+			t.Errorf("view missing %q:\n%s", expected, view)
+		}
+	}
+}
+
 func TestScreensDoNotEmitANSIBackgroundColors(t *testing.T) {
 	previousProfile := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)

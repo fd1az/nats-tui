@@ -180,6 +180,9 @@ type KeyValueRestoreInput struct {
 type Model struct {
 	profile                      string
 	snapshot                     dashboard.Snapshot
+	dashboardTimeline            *dashboard.Timeline
+	dashboardPanels              []dashboard.Panel
+	dashboardServices            DashboardServices
 	connect                      ConnectFunc
 	loadMessages                 LoadMessagesFunc
 	loadMessageHistory           LoadMessageHistoryFunc
@@ -617,6 +620,7 @@ func NewModel(profile, server string, connect ConnectFunc, loaders ...LoadMessag
 		consumerHistory:       make(map[consumerID][]consumerMetricSample),
 		messageInspectionMode: messages.InspectAuto,
 		subjectTraffic:        subjects.NewTrafficTracker(subjects.DefaultTrafficWindow),
+		dashboardTimeline:     dashboard.NewTimeline(dashboard.DefaultSampleLimit),
 	}
 	if len(loaders) > 0 {
 		model.loadMessages = loaders[0]
@@ -1001,6 +1005,8 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m.showConnection()
 	case connectedMsg:
 		m.profile = msg.profile
+		m.dashboardTimeline.Reset()
+		m.dashboardTimeline.Record(msg.snapshot)
 		m.recordConsumerMetrics(msg.snapshot.ObservedAt, msg.consumers)
 		m.snapshot = msg.snapshot
 		m.streams = append([]streams.Summary(nil), msg.streams...)
@@ -1057,7 +1063,16 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.bookmarks.loading = true
 			commands = append(commands, m.bookmarkServices.Load(m.bookmarkInventory()))
 		}
+		if m.dashboardServices.Load != nil {
+			commands = append(commands, m.dashboardServices.Load(msg.profile))
+		}
 		return m, tea.Batch(commands...)
+	case dashboardPanelsLoadedMsg:
+		m.dashboardPanels = append([]dashboard.Panel(nil), msg.panels...)
+		return m, nil
+	case dashboardPanelsFailedMsg:
+		m.err = msg.err
+		return m, nil
 	case connectionFailedMsg:
 		m.err = msg.err
 		return m.showConnection()
@@ -3045,6 +3060,7 @@ func (m *Model) applyRefresh(msg refreshedMsg) {
 	selectedConsumer := selectedConsumerID(m.consumers, m.consumerCursor)
 	selectedBucket := selectedBucketName(m.keyValueBuckets, m.keyValueCursor)
 	m.recordConsumerMetrics(msg.snapshot.ObservedAt, msg.consumers)
+	m.dashboardTimeline.Record(msg.snapshot)
 	m.snapshot = msg.snapshot
 	m.streams = append(m.streams[:0], msg.streams...)
 	m.consumers = append(m.consumers[:0], msg.consumers...)
@@ -4234,7 +4250,16 @@ func (m Model) dashboardView(width int) string {
 	meta := lipgloss.NewStyle().Foreground(m.theme.secondary).Render(
 		strings.Join(nonEmpty(m.snapshot.ServerName, "NATS "+m.snapshot.Version, m.snapshot.Cluster), "  •  "),
 	)
-	return meta + "\n\n" + renderCardGrid(cards, columns)
+	sections := []string{meta, renderCardGrid(cards, columns), m.dashboardTrafficView(width)}
+	if m.height > 0 && m.height < 34 {
+		sections = append(sections, m.dashboardCompactStatus(width))
+	} else {
+		sections = append(sections, m.dashboardCapacityView(width), m.dashboardRuntimeView(width))
+	}
+	if panels := m.dashboardCustomPanelsView(width); panels != "" {
+		sections = append(sections, panels)
+	}
+	return strings.Join(sections, "\n\n")
 }
 
 func (m Model) dashboardCards(width int, compact bool) []string {
@@ -4244,6 +4269,209 @@ func (m Model) dashboardCards(width int, compact bool) []string {
 		m.card("STREAMS", fmt.Sprintf("%d", m.snapshot.Streams), "active", m.theme.mint, width, compact),
 		m.card("CONSUMERS", fmt.Sprintf("%d", m.snapshot.Consumers), "attached", m.theme.yellow, width, compact),
 	}
+}
+
+func (m Model) dashboardTrafficView(width int) string {
+	samples := m.dashboardTimeline.Samples()
+	messages, bytes, cpu := make([]float64, 0, len(samples)), make([]float64, 0, len(samples)), make([]float64, 0, len(samples))
+	for _, sample := range samples {
+		messages = append(messages, sample.MessagesPerSec)
+		bytes = append(bytes, sample.BytesPerSec)
+		cpu = append(cpu, sample.CPUPercent)
+	}
+	latest := dashboard.Sample{}
+	if len(samples) > 0 {
+		latest = samples[len(samples)-1]
+	}
+	lineWidth := max(min(width/3-2, 28), 8)
+	items := []string{
+		metricTrend("MSG RATE", fmt.Sprintf("%.1f/s", latest.MessagesPerSec), sparkline(messages, lineWidth), m.theme.accent),
+		metricTrend("BYTE RATE", humanBytes(uint64(latest.BytesPerSec))+"/s", sparkline(bytes, lineWidth), m.theme.cyan),
+		metricTrend("SERVER CPU", fmt.Sprintf("%.1f%%", m.snapshot.Runtime.CPUPercent), sparkline(cpu, lineWidth), m.theme.mint),
+	}
+	if width < 76 {
+		return strings.Join(items, "\n")
+	}
+	return lipgloss.JoinHorizontal(lipgloss.Top, padMetric(items[0], width/3), padMetric(items[1], width/3), padMetric(items[2], width-width/3*2))
+}
+
+func metricTrend(label, value, trend string, color lipgloss.Color) string {
+	return lipgloss.NewStyle().Foreground(lipgloss.Color("#626B85")).Render(label+"  ") + lipgloss.NewStyle().Bold(true).Foreground(color).Render(value) + "  " + lipgloss.NewStyle().Foreground(color).Render(trend)
+}
+
+func padMetric(value string, width int) string {
+	return lipgloss.NewStyle().Width(max(width, 1)).Render(value)
+}
+
+func sparkline(values []float64, width int) string {
+	if width < 1 {
+		return ""
+	}
+	if len(values) > width {
+		values = values[len(values)-width:]
+	}
+	if len(values) == 0 {
+		return strings.Repeat("·", min(width, 4))
+	}
+	maxValue := float64(0)
+	for _, value := range values {
+		if value > maxValue {
+			maxValue = value
+		}
+	}
+	levels := []rune("▁▂▃▄▅▆▇█")
+	result := make([]rune, len(values))
+	for index, value := range values {
+		level := 0
+		if maxValue > 0 {
+			level = min(int(value/maxValue*float64(len(levels)-1)), len(levels)-1)
+		}
+		result[index] = levels[level]
+	}
+	return string(result)
+}
+
+func (m Model) dashboardCapacityView(width int) string {
+	items := []string{
+		m.capacityLine("MEMORY", m.snapshot.MemoryBytes, m.snapshot.Limits.MaxMemory, width),
+		m.capacityLine("FILE", m.snapshot.FileBytes, m.snapshot.Limits.MaxFile, width),
+		m.countCapacityLine("STREAM CAP", m.snapshot.Streams, m.snapshot.Limits.MaxStreams, width),
+		m.countCapacityLine("CONSUMER CAP", m.snapshot.Consumers, m.snapshot.Limits.MaxConsumers, width),
+	}
+	if width < 96 {
+		return strings.Join(items, "\n")
+	}
+	left, right := lipgloss.NewStyle().Width(width/2).Render(strings.Join(items[:2], "\n")), strings.Join(items[2:], "\n")
+	return lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+}
+
+func (m Model) dashboardCompactStatus(width int) string {
+	limits := fmt.Sprintf("CAPACITY  memory %s  •  file %s", compactUtilization(m.snapshot.MemoryBytes, m.snapshot.Limits.MaxMemory), compactUtilization(m.snapshot.FileBytes, m.snapshot.Limits.MaxFile))
+	runtime := m.snapshot.Runtime
+	health := "runtime unavailable"
+	if runtime.Available {
+		health = fmt.Sprintf("CPU %.1f%%  •  RAM %s  •  %d connections  •  %d slow/stale/stalled", runtime.CPUPercent, humanBytes(runtime.MemoryBytes), runtime.Connections, runtime.SlowConsumers+runtime.StaleConnections+runtime.StalledClients)
+	}
+	return lipgloss.NewStyle().Foreground(m.theme.secondary).Render(truncate(limits, width)) + "\n" + lipgloss.NewStyle().Foreground(m.theme.muted).Render(truncate("HEALTH  "+health, width))
+}
+
+func compactUtilization(used uint64, limit int64) string {
+	if limit <= 0 {
+		return humanBytes(used) + " / unlimited"
+	}
+	return fmt.Sprintf("%s / %.0f%%", humanBytes(used), min(float64(used)/float64(limit), 1)*100)
+}
+
+func (m Model) capacityLine(label string, used uint64, limit int64, width int) string {
+	return m.capacity(label, humanBytes(used), used, limit, width)
+}
+func (m Model) countCapacityLine(label string, used, limit, width int) string {
+	return m.capacity(label, fmt.Sprintf("%d", used), uint64(max(used, 0)), int64(limit), width)
+}
+func (m Model) capacity(label, value string, used uint64, limit int64, width int) string {
+	percent, limitText := float64(0), "unlimited"
+	if limit > 0 {
+		percent = min(float64(used)/float64(limit), 1)
+		limitText = fmt.Sprintf("%.0f%%", percent*100)
+	}
+	barWidth := max(min(width/5, 14), 5)
+	filled := int(percent * float64(barWidth))
+	bar := lipgloss.NewStyle().Foreground(m.theme.accent).Render(strings.Repeat("━", filled)) + lipgloss.NewStyle().Foreground(m.theme.border).Render(strings.Repeat("─", barWidth-filled))
+	return lipgloss.NewStyle().Foreground(m.theme.muted).Render(fmt.Sprintf("%-9s", label)) + " " + bar + "  " + lipgloss.NewStyle().Foreground(m.theme.primary).Render(value) + "  " + lipgloss.NewStyle().Foreground(m.theme.secondary).Render(limitText)
+}
+
+func (m Model) dashboardRuntimeView(width int) string {
+	runtime := m.snapshot.Runtime
+	if !runtime.Available {
+		return lipgloss.NewStyle().Foreground(m.theme.muted).Render("RUNTIME  unavailable — configure --monitor-url or grant $SYS stats access")
+	}
+	uptime, goroutines := "—", "—"
+	if !runtime.StartedAt.IsZero() {
+		uptime = humanDuration(m.snapshot.ObservedAt.Sub(runtime.StartedAt))
+	}
+	if runtime.GoroutinesAvailable {
+		goroutines = fmt.Sprintf("%d", runtime.Goroutines)
+	}
+	health, color := "healthy", m.theme.mint
+	if runtime.SlowConsumers+runtime.StaleConnections+runtime.StalledClients > 0 {
+		health, color = "attention", m.theme.yellow
+	}
+	left := fmt.Sprintf("RUNTIME  %d server(s)  •  uptime %s  •  CPU %.1f%%  •  RAM %s  •  goroutines %s", runtime.Servers, uptime, runtime.CPUPercent, humanBytes(runtime.MemoryBytes), goroutines)
+	right := fmt.Sprintf("CONNECTION HEALTH  %s  •  %d connections  •  %d subscriptions  •  %d slow  •  %d stale  •  %d stalled", health, runtime.Connections, runtime.Subscriptions, runtime.SlowConsumers, runtime.StaleConnections, runtime.StalledClients)
+	return lipgloss.NewStyle().Foreground(m.theme.secondary).Render(truncate(left, width)) + "\n" + lipgloss.NewStyle().Foreground(color).Render(truncate(right, width))
+}
+
+func (m Model) dashboardCustomPanelsView(width int) string {
+	if len(m.dashboardPanels) == 0 {
+		return ""
+	}
+	samples := m.dashboardTimeline.Samples()
+	lines := []string{lipgloss.NewStyle().Bold(true).Foreground(m.theme.secondary).Render("CUSTOM PANELS")}
+	for _, panel := range m.dashboardPanels {
+		value, values := m.dashboardPanelMetric(panel.Metric, samples)
+		lines = append(lines, lipgloss.NewStyle().Foreground(m.theme.muted).Render(truncate(panel.Title, 22))+"  "+lipgloss.NewStyle().Foreground(m.theme.primary).Render(value)+"  "+lipgloss.NewStyle().Foreground(m.theme.accent).Render(sparkline(values, max(min(width-32, 40), 8))))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m Model) dashboardPanelMetric(metric dashboard.Metric, samples []dashboard.Sample) (string, []float64) {
+	values := make([]float64, 0, len(samples))
+	value := "—"
+	for _, sample := range samples {
+		switch metric {
+		case dashboard.MetricMessageRate:
+			values = append(values, sample.MessagesPerSec)
+		case dashboard.MetricByteRate:
+			values = append(values, sample.BytesPerSec)
+		case dashboard.MetricCPU:
+			values = append(values, sample.CPUPercent)
+		case dashboard.MetricServerMemory:
+			values = append(values, float64(sample.ServerMemory))
+		case dashboard.MetricConnections:
+			values = append(values, float64(sample.Connections))
+		case dashboard.MetricStorage:
+			values = append(values, float64(sample.JetStreamBytes))
+		case dashboard.MetricMemoryStorage:
+			values = append(values, float64(sample.MemoryStorage))
+		case dashboard.MetricFileStorage:
+			values = append(values, float64(sample.FileStorage))
+		case dashboard.MetricStreams:
+			values = append(values, float64(sample.Streams))
+		case dashboard.MetricConsumers:
+			values = append(values, float64(sample.Consumers))
+		case dashboard.MetricSlowConsumers:
+			values = append(values, float64(sample.SlowConsumers))
+		}
+	}
+	switch metric {
+	case dashboard.MetricMessageRate:
+		if len(values) > 0 {
+			value = fmt.Sprintf("%.1f/s", values[len(values)-1])
+		}
+	case dashboard.MetricByteRate:
+		if len(values) > 0 {
+			value = humanBytes(uint64(values[len(values)-1])) + "/s"
+		}
+	case dashboard.MetricStorage:
+		value = humanBytes(m.snapshot.Bytes)
+	case dashboard.MetricMemoryStorage:
+		value = humanBytes(m.snapshot.MemoryBytes)
+	case dashboard.MetricFileStorage:
+		value = humanBytes(m.snapshot.FileBytes)
+	case dashboard.MetricStreams:
+		value = fmt.Sprintf("%d", m.snapshot.Streams)
+	case dashboard.MetricConsumers:
+		value = fmt.Sprintf("%d", m.snapshot.Consumers)
+	case dashboard.MetricCPU:
+		value = fmt.Sprintf("%.1f%%", m.snapshot.Runtime.CPUPercent)
+	case dashboard.MetricServerMemory:
+		value = humanBytes(m.snapshot.Runtime.MemoryBytes)
+	case dashboard.MetricConnections:
+		value = fmt.Sprintf("%d", m.snapshot.Runtime.Connections)
+	case dashboard.MetricSlowConsumers:
+		value = fmt.Sprintf("%d", m.snapshot.Runtime.SlowConsumers)
+	}
+	return value, values
 }
 
 func (m Model) card(label, value, caption string, color lipgloss.Color, width int, compact bool) string {

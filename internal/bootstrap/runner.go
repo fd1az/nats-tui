@@ -180,6 +180,19 @@ func defaultBookmarkRepository(profile string) *localstate.BookmarkRepository {
 	return localstate.NewBookmarkRepository(localstate.OSStateFile{Path: filepath.Join(directory, "nats-tui", "bookmarks-"+profile+".json")})
 }
 
+func defaultDashboardRepository(profile string) *localstate.DashboardRepository {
+	directory, err := os.UserConfigDir()
+	if err != nil {
+		if home, homeErr := os.UserHomeDir(); homeErr == nil {
+			directory = filepath.Join(home, ".config")
+		} else {
+			directory = "."
+		}
+	}
+	profile = localStateProfile(profile)
+	return localstate.NewDashboardRepository(localstate.OSStateFile{Path: filepath.Join(directory, "nats-tui", "dashboard-"+profile+".json")})
+}
+
 func defaultProfileRepository() *localstate.ProfileRepository {
 	directory, err := os.UserConfigDir()
 	if err != nil {
@@ -1861,6 +1874,17 @@ func (r Runner) Run(ctx context.Context, settings config.Settings) error {
 			return tui.BookmarksLoaded(items)
 		}
 	}
+	loadDashboardPanels := func(profile string) tea.Cmd {
+		return func() tea.Msg {
+			panelSettings := activeSettings
+			panelSettings.Profile = profile
+			panels, err := r.ListDashboardPanels(ctx, panelSettings)
+			if err != nil {
+				return tui.DashboardPanelsFailed(err)
+			}
+			return tui.DashboardPanelsLoaded(panels)
+		}
+	}
 	addBookmark := func(command appbookmarks.AddCommand) tea.Cmd {
 		return func() tea.Msg {
 			item, err := r.AddBookmark(ctx, activeSettings, command)
@@ -1934,6 +1958,7 @@ func (r Runner) Run(ctx context.Context, settings config.Settings) error {
 	}, Ack: ackAlert, AckAll: ackAllAlerts, Scan: scanAlerts})
 	model = model.WithCommandBar(tui.CommandBarServices{Load: loadCommandBar, Record: recordCommand})
 	model = model.WithBookmarks(tui.BookmarkServices{Load: loadBookmarks, Add: addBookmark, Remove: removeBookmark, SaveSearch: saveSearch})
+	model = model.WithDashboard(tui.DashboardServices{Load: loadDashboardPanels})
 	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithContext(ctx))
 	if _, err := program.Run(); err != nil {
 		return fmt.Errorf("run terminal UI: %w", err)

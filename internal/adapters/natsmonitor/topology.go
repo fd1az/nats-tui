@@ -59,17 +59,28 @@ type routeStatWire struct {
 type gatewayStatWire struct {
 	Name string `json:"name"`
 }
+type dataStatsWire struct {
+	Messages uint64 `json:"msgs"`
+	Bytes    uint64 `json:"bytes"`
+}
 type serverStatsWire struct {
-	Start         time.Time         `json:"start"`
-	Mem           int64             `json:"mem"`
-	CPU           float64           `json:"cpu"`
-	Connections   int               `json:"connections"`
-	Subscriptions int               `json:"subscriptions"`
-	SlowConsumers int64             `json:"slow_consumers"`
-	ActiveServers int               `json:"active_servers"`
-	JetStream     *jetStreamWire    `json:"jetstream"`
-	Routes        []routeStatWire   `json:"routes"`
-	Gateways      []gatewayStatWire `json:"gateways"`
+	Start            time.Time         `json:"start"`
+	Mem              int64             `json:"mem"`
+	CPU              float64           `json:"cpu"`
+	Connections      int               `json:"connections"`
+	Subscriptions    int               `json:"subscriptions"`
+	SlowConsumers    int64             `json:"slow_consumers"`
+	StaleConnections int64             `json:"stale_connections"`
+	StalledClients   int64             `json:"stalled_clients"`
+	Cores            int               `json:"cores"`
+	MaxProcs         int               `json:"gomaxprocs"`
+	Goroutines       int               `json:"goroutines"`
+	Sent             dataStatsWire     `json:"sent"`
+	Received         dataStatsWire     `json:"received"`
+	ActiveServers    int               `json:"active_servers"`
+	JetStream        *jetStreamWire    `json:"jetstream"`
+	Routes           []routeStatWire   `json:"routes"`
+	Gateways         []gatewayStatWire `json:"gateways"`
 }
 type statsResponse struct {
 	Server serverInfoWire  `json:"server"`
@@ -86,22 +97,32 @@ type apiResponse struct {
 }
 
 type varzWire struct {
-	ID            string    `json:"server_id"`
-	Name          string    `json:"server_name"`
-	Version       string    `json:"version"`
-	Host          string    `json:"host"`
-	Port          int       `json:"port"`
-	ConnectURLs   []string  `json:"connect_urls"`
-	WSConnectURLs []string  `json:"ws_connect_urls"`
-	Start         time.Time `json:"start"`
-	Now           time.Time `json:"now"`
-	Mem           int64     `json:"mem"`
-	CPU           float64   `json:"cpu"`
-	Connections   int       `json:"connections"`
-	Subscriptions int       `json:"subscriptions"`
-	SlowConsumers int64     `json:"slow_consumers"`
-	Tags          []string  `json:"tags"`
-	Cluster       struct {
+	ID               string    `json:"server_id"`
+	Name             string    `json:"server_name"`
+	Version          string    `json:"version"`
+	Host             string    `json:"host"`
+	Port             int       `json:"port"`
+	ConnectURLs      []string  `json:"connect_urls"`
+	WSConnectURLs    []string  `json:"ws_connect_urls"`
+	Start            time.Time `json:"start"`
+	Now              time.Time `json:"now"`
+	Mem              int64     `json:"mem"`
+	CPU              float64   `json:"cpu"`
+	Connections      int       `json:"connections"`
+	Subscriptions    int       `json:"subscriptions"`
+	SlowConsumers    int64     `json:"slow_consumers"`
+	StaleConnections int64     `json:"stale_connections"`
+	StalledClients   int64     `json:"stalled_clients"`
+	Cores            int       `json:"cores"`
+	MaxProcs         int       `json:"gomaxprocs"`
+	Goroutines       int       `json:"goroutines"`
+	NumGoroutines    int       `json:"num_goroutines"`
+	InMessages       uint64    `json:"in_msgs"`
+	OutMessages      uint64    `json:"out_msgs"`
+	InBytes          uint64    `json:"in_bytes"`
+	OutBytes         uint64    `json:"out_bytes"`
+	Tags             []string  `json:"tags"`
+	Cluster          struct {
 		Name string `json:"name"`
 	} `json:"cluster"`
 	JetStream struct {

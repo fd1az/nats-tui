@@ -210,6 +210,7 @@ type Dependencies struct {
 	Alerts                 AlertManager
 	Commands               CommandManager
 	Bookmarks              BookmarkManager
+	Dashboard              DashboardManager
 	Clock                  Clock
 	FileSystem             FileSystem
 	Version                BuildInfo
@@ -307,6 +308,7 @@ func NewRoot(deps Dependencies) *cobra.Command {
 	root.AddCommand(newAlertsCommand(values, deps.Alerts))
 	root.AddCommand(newCommandsCommand(values, deps.Commands))
 	root.AddCommand(newBookmarksCommand(values, deps.Bookmarks))
+	root.AddCommand(newDashboardCommand(values, deps.Dashboard))
 	return root
 }
 

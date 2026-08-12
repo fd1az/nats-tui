@@ -114,6 +114,22 @@ existing values:
     nats-tui consumer edit EVENTS worker --max-ack-pending 500
     nats-tui consumer delete EVENTS worker --yes
 
+The Dashboard combines JetStream usage with cluster runtime telemetry. It shows
+message and byte rates, bounded local sparklines, memory/file storage, account
+limits and utilization, CPU/RAM/uptime/traffic, and connection health. Runtime
+metrics use `$SYS` server stats when authorized and fall back to `--monitor-url`;
+ordinary accounts degrade cleanly when neither source is available. Goroutines
+are shown when the selected monitoring source publishes that optional field.
+
+Custom panels are persistent per connection profile and appear below the
+built-in dashboard. Available metrics and panel configuration are scriptable:
+
+    nats-tui dashboard metrics
+    nats-tui dashboard panel add traffic message-rate --title 'Message traffic'
+    nats-tui dashboard panel add server-cpu cpu
+    nats-tui dashboard panel
+    nats-tui dashboard panel delete server-cpu --yes
+
 Dashboard, stream, and consumer state refresh automatically every three seconds.
 Press r to refresh immediately. Refresh calls have a three-second timeout and do
 not overlap. Failures retain the last good snapshot, show `Stale · retrying`, and
