@@ -41,6 +41,7 @@ type FileSystem interface {
 
 type osFileSystem struct{}
 
+// #nosec G304 -- the operator explicitly selects the upload source path.
 func (osFileSystem) Open(name string) (ReadFile, error)     { return os.Open(name) }
 func (osFileSystem) Lstat(name string) (fs.FileInfo, error) { return os.Lstat(name) }
 func (osFileSystem) CreateTemp(dir, pattern string) (TempFile, error) {
@@ -75,12 +76,16 @@ func (t ObjectTransfer) UploadObject(ctx context.Context, store objectstore.Tran
 	if !status.Mode().IsRegular() {
 		return objectstore.ObjectSummary{}, errors.Join(fmt.Errorf("upload path %q is not a regular file", command.Path), file.Close())
 	}
+	if status.Size() < 0 {
+		return objectstore.ObjectSummary{}, errors.Join(fmt.Errorf("upload path %q has an invalid negative size", command.Path), file.Close())
+	}
 	name := strings.TrimSpace(command.Name)
 	if name == "" {
 		name = filepath.Base(command.Path)
 	}
 	result, transferErr := objectstore.NewUploadHandler(store).Handle(ctx, objectstore.UploadCommand{
 		Bucket: command.Bucket, Name: name, Description: command.Description,
+		// #nosec G115 -- negative file sizes are rejected above.
 		Headers: command.Headers, Metadata: command.Metadata, Reader: file, Size: uint64(status.Size()),
 	}, progress)
 	if closeErr := file.Close(); closeErr != nil {

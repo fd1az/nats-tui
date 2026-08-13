@@ -1,6 +1,6 @@
 module github.com/fd1az/nats-tui
 
-go 1.26.0
+go 1.26.5
 
 require (
 	github.com/atotto/clipboard v0.1.4

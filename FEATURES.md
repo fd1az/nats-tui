@@ -293,7 +293,8 @@ required system-account and decentralized-authentication APIs.
 - [ ] Compatibility test matrix across supported NATS versions.
 - [ ] Permission-restricted account test fixtures.
 - [ ] Large-account performance benchmarks.
-- [ ] CI with test, race, vet, lint, and vulnerability scanning.
+- [x] Security CI with govulncheck, gosec, CodeQL, dependency review, and automated dependency updates.
+- [ ] General pull-request CI with test, race, vet, and lint gates.
 - [x] Cross-platform release binaries for macOS, Linux, and Windows on AMD64 and ARM64.
 - [x] GoReleaser configuration, SHA-256 checksums, and Linux `.deb`, `.rpm`, and `.apk` packages.
 - [x] Homebrew cask, Scoop manifest, and verified shell/PowerShell installers.

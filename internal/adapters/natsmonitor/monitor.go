@@ -323,6 +323,7 @@ func readCredential(reference string) ([]byte, error) {
 	case strings.Contains(reference, "-----BEGIN NATS USER JWT-----"), strings.HasPrefix(reference, "SU"), strings.HasPrefix(reference, "eyJ"):
 		return []byte(reference), nil
 	default:
+		// #nosec G304 -- the operator explicitly configures the credentials file path.
 		return os.ReadFile(reference)
 	}
 }
@@ -913,6 +914,7 @@ func (m *Monitor) CreateKeyValueBucket(ctx context.Context, definition kvstore.D
 	}
 	config := jetstream.KeyValueConfig{
 		Bucket: definition.Name, Description: definition.Description, Storage: storage,
+		// #nosec G115 -- domain validation bounds KV history to 1..64.
 		History: uint8(definition.History), TTL: definition.TTL, MaxBytes: definition.MaxBytes,
 		MaxValueSize: definition.MaxValueSize, Replicas: definition.Replicas, Compression: definition.Compression,
 	}
@@ -1115,6 +1117,7 @@ func applyKeyValueChanges(config *jetstream.KeyValueConfig, changes kvstore.Chan
 		config.Description = *changes.Description
 	}
 	if changes.History != nil {
+		// #nosec G115 -- domain validation bounds KV history to 1..64.
 		config.History = uint8(*changes.History)
 	}
 	if changes.TTL != nil {
@@ -1663,7 +1666,7 @@ func (m *Monitor) BrowseMessages(ctx context.Context, query messages.HistoryQuer
 		return []messages.Record{}, nil
 	}
 
-	result := make([]messages.Record, 0, min(limit, int(info.State.Msgs)))
+	result := make([]messages.Record, 0, limit)
 	lastSequence := info.State.LastSeq
 	if query.EndSequence > 0 {
 		lastSequence = min(lastSequence, query.EndSequence)

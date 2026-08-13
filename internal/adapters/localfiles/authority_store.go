@@ -22,6 +22,7 @@ func NewAuthorityStore(directory string) (AuthorityStore, error) {
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return AuthorityStore{}, fmt.Errorf("create authority directory: %w", err)
 	}
+	// #nosec G302 -- owner execute permission is required to traverse a private directory.
 	if err := os.Chmod(directory, 0o700); err != nil {
 		return AuthorityStore{}, fmt.Errorf("secure authority directory: %w", err)
 	}
@@ -138,6 +139,7 @@ func (s AuthorityStore) RemoveAccount(_ context.Context, accountID string) (stri
 			continue
 		}
 		path := filepath.Join(s.directory, entry.Name())
+		// #nosec G304 -- path is joined from the private authority directory and a ReadDir entry.
 		contents, readErr := os.ReadFile(path)
 		if readErr != nil {
 			return "", fmt.Errorf("read managed user credentials: %w", readErr)
@@ -187,6 +189,7 @@ func (s AuthorityStore) ensureTrash() (string, error) {
 	if err := os.MkdirAll(path, 0o700); err != nil {
 		return "", fmt.Errorf("create authority trash: %w", err)
 	}
+	// #nosec G302 -- owner execute permission is required to traverse the private trash directory.
 	if err := os.Chmod(path, 0o700); err != nil {
 		return "", fmt.Errorf("secure authority trash: %w", err)
 	}
@@ -224,6 +227,7 @@ func shortPublicKey(value string) string {
 }
 
 func writePrivate(path string, contents []byte) error {
+	// #nosec G304 -- path is derived from the private authority directory and validated entity names.
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return fmt.Errorf("create private artifact %s: %w", path, err)

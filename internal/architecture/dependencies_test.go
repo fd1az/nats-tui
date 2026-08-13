@@ -10,29 +10,54 @@ import (
 func TestApplicationDoesNotImportFrameworksOrAdapters(t *testing.T) {
 	t.Parallel()
 
-	cmd := exec.Command("go", "list", "-json", "../app/...")
-	out, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("list application packages: %v", err)
-	}
-
-	decoder := json.NewDecoder(strings.NewReader(string(out)))
-	for decoder.More() {
-		var pkg struct {
-			ImportPath string
-			Imports    []string
-		}
-		if err := decoder.Decode(&pkg); err != nil {
-			t.Fatalf("decode go list output: %v", err)
-		}
-
+	packages := listPackages(t, "../app/...")
+	for _, pkg := range packages {
 		for _, dependency := range pkg.Imports {
-			assertAllowedDependency(t, pkg.ImportPath, dependency)
+			assertApplicationDependencyAllowed(t, pkg.ImportPath, dependency)
 		}
 	}
 }
 
-func assertAllowedDependency(t *testing.T, pkg, dependency string) {
+func TestDomainDependsOnlyOnStandardLibraryAndDomain(t *testing.T) {
+	t.Parallel()
+
+	packages := listPackages(t, "../domain/...")
+	for _, pkg := range packages {
+		for _, dependency := range pkg.Imports {
+			if strings.Contains(dependency, ".") && !strings.HasPrefix(dependency, "github.com/fd1az/nats-tui/internal/domain/") {
+				t.Errorf("domain package %s imports non-domain dependency %s", pkg.ImportPath, dependency)
+			}
+		}
+	}
+}
+
+type packageDependencies struct {
+	ImportPath string
+	Imports    []string
+}
+
+func listPackages(t *testing.T, pattern string) []packageDependencies {
+	t.Helper()
+
+	cmd := exec.Command("go", "list", "-json", pattern)
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("list packages %s: %v", pattern, err)
+	}
+
+	decoder := json.NewDecoder(strings.NewReader(string(out)))
+	var packages []packageDependencies
+	for decoder.More() {
+		var pkg packageDependencies
+		if err := decoder.Decode(&pkg); err != nil {
+			t.Fatalf("decode go list output: %v", err)
+		}
+		packages = append(packages, pkg)
+	}
+	return packages
+}
+
+func assertApplicationDependencyAllowed(t *testing.T, pkg, dependency string) {
 	t.Helper()
 
 	forbidden := []string{
@@ -43,6 +68,7 @@ func assertAllowedDependency(t *testing.T, pkg, dependency string) {
 		"nats.go",
 		"internal/adapters",
 		"internal/ports",
+		"internal/bootstrap",
 	}
 
 	for _, fragment := range forbidden {

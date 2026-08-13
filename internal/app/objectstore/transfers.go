@@ -215,7 +215,10 @@ type progressReader struct {
 
 func (r *progressReader) Read(buffer []byte) (int, error) {
 	read, err := (&contextReader{ctx: r.ctx, reader: r.reader}).Read(buffer)
-	r.transferred += uint64(read)
+	if read > 0 {
+		// #nosec G115 -- io.Reader returns a non-negative count bounded by len(buffer).
+		r.transferred += uint64(read)
+	}
 	reportProgress(r.progress, r.transferred, r.total)
 	return read, err
 }
@@ -229,7 +232,10 @@ type progressWriter struct {
 
 func (w *progressWriter) Write(buffer []byte) (int, error) {
 	written, err := w.writer.Write(buffer)
-	w.transferred += uint64(written)
+	if written > 0 {
+		// #nosec G115 -- io.Writer returns a non-negative count bounded by len(buffer).
+		w.transferred += uint64(written)
+	}
 	reportProgress(w.progress, w.transferred, w.total)
 	return written, err
 }

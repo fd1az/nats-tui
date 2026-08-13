@@ -21,7 +21,9 @@ type FileSystem interface {
 type OSFileSystem struct{}
 
 func (OSFileSystem) ReadDir(path string) ([]fs.DirEntry, error) { return os.ReadDir(path) }
-func (OSFileSystem) ReadFile(path string) ([]byte, error)       { return os.ReadFile(path) }
+
+// #nosec G304 -- paths are entries discovered inside the operator-selected NATS context directory.
+func (OSFileSystem) ReadFile(path string) ([]byte, error) { return os.ReadFile(path) }
 
 type Importer struct{ files FileSystem }
 

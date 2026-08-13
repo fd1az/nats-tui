@@ -3,6 +3,8 @@
 A beautiful, keyboard-first terminal workspace for NATS JetStream.
 
 See [FEATURES.md](FEATURES.md) for the live feature-parity roadmap and checklist.
+See [SECURITY.md](SECURITY.md) for vulnerability reporting and automated
+security controls.
 
 The current vertical slice presents an interactive connection flow, connects to
 NATS without requiring authentication, loads a real JetStream account snapshot,

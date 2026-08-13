@@ -248,7 +248,7 @@ func (m Model) connectionTable(width int, items []app.Connection) string {
 			if item.SlowConsumer() {
 				slow = " ⚠"
 			}
-			rows = append(rows, lipgloss.NewStyle().Foreground(color).Bold(selected == m.connections.cursor).Render(fmt.Sprintf("%s%-18s %-12s %-14s %-8s %8s %9s %5d%s", marker, truncate(valueOr(item.Name, "(unnamed)"), 18), truncate(valueOr(item.User, "-"), 12), truncate(item.IP, 14), truncate(valueOr(item.Lang, "-"), 8), item.RTT, humanBytes(uint64(item.PendingBytes)), len(item.Subscriptions), slow)))
+			rows = append(rows, lipgloss.NewStyle().Foreground(color).Bold(selected == m.connections.cursor).Render(fmt.Sprintf("%s%-18s %-12s %-14s %-8s %8s %9s %5d%s", marker, truncate(valueOr(item.Name, "(unnamed)"), 18), truncate(valueOr(item.User, "-"), 12), truncate(item.IP, 14), truncate(valueOr(item.Lang, "-"), 8), item.RTT, humanBytes(nonNegativeBytes(item.PendingBytes)), len(item.Subscriptions), slow)))
 			selected++
 		}
 	}
@@ -256,7 +256,7 @@ func (m Model) connectionTable(width int, items []app.Connection) string {
 }
 func (m Model) connectionDetail(width int, item app.Connection) string {
 	label := lipgloss.NewStyle().Bold(true).Foreground(m.theme.muted)
-	lines := []string{lipgloss.NewStyle().Bold(true).Foreground(m.theme.accent).Render(valueOr(item.Name, "(unnamed)")) + fmt.Sprintf("  %s:%d", item.ServerID, item.CID), label.Render("USER / ACCOUNT") + "  " + valueOr(item.User, "-") + " / " + valueOr(item.Account, "-"), label.Render("CLIENT") + "  " + valueOr(item.Lang, "-") + " " + valueOr(item.Version, "-"), label.Render("IP / RTT") + "  " + item.IP + " / " + item.RTT.String(), label.Render("TRAFFIC IN / OUT") + "  " + humanBytes(uint64(item.InBytes)) + " / " + humanBytes(uint64(item.OutBytes)), label.Render("PENDING / STALLS") + "  " + humanBytes(uint64(item.PendingBytes)) + fmt.Sprintf(" / %d", item.Stalls), "", label.Render(fmt.Sprintf("SUBSCRIPTIONS  %d", len(item.Subscriptions)))}
+	lines := []string{lipgloss.NewStyle().Bold(true).Foreground(m.theme.accent).Render(valueOr(item.Name, "(unnamed)")) + fmt.Sprintf("  %s:%d", item.ServerID, item.CID), label.Render("USER / ACCOUNT") + "  " + valueOr(item.User, "-") + " / " + valueOr(item.Account, "-"), label.Render("CLIENT") + "  " + valueOr(item.Lang, "-") + " " + valueOr(item.Version, "-"), label.Render("IP / RTT") + "  " + item.IP + " / " + item.RTT.String(), label.Render("TRAFFIC IN / OUT") + "  " + humanBytes(nonNegativeBytes(item.InBytes)) + " / " + humanBytes(nonNegativeBytes(item.OutBytes)), label.Render("PENDING / STALLS") + "  " + humanBytes(nonNegativeBytes(item.PendingBytes)) + fmt.Sprintf(" / %d", item.Stalls), "", label.Render(fmt.Sprintf("SUBSCRIPTIONS  %d", len(item.Subscriptions)))}
 	for i, sub := range item.Subscriptions {
 		marker := "  "
 		if i == m.connections.subCursor {

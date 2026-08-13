@@ -1,0 +1,9 @@
+name: nats-tui CodeQL configuration
+
+queries:
+  - uses: security-and-quality
+
+paths-ignore:
+  - .reference
+  - dist
+

@@ -1196,7 +1196,11 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if m.subjectTraffic == nil {
 			m.subjectTraffic = subjects.NewTrafficTracker(subjects.DefaultTrafficWindow)
 		}
-		m.subjectObservationReceived += uint64(m.subjectTraffic.Observe(msg.samples...))
+		observed := m.subjectTraffic.Observe(msg.samples...)
+		if observed > 0 {
+			// #nosec G115 -- a positive int always fits in uint64.
+			m.subjectObservationReceived += uint64(observed)
+		}
 		selected := selectedSubjectName(m.displayedSubjects(), m.subjectCursor)
 		m.rebuildSubjects()
 		m.subjectCursor = findSubject(m.displayedSubjects(), selected)
@@ -3325,10 +3329,14 @@ func (m *Model) selectWorkspace(key string) {
 		m.activeWorkspace = 9
 		return
 	}
-	if len(key) != 1 || key[0] < '1' || key[0] > byte('0'+len(workspaces)) {
+	if len(key) != 1 || key[0] < '1' || key[0] > '9' {
 		return
 	}
-	m.activeWorkspace = int(key[0] - '1')
+	workspace := int(key[0] - '1')
+	if workspace >= len(workspaces) {
+		return
+	}
+	m.activeWorkspace = workspace
 }
 
 func (m Model) View() string {
@@ -3854,7 +3862,8 @@ func consumerTrend(history []consumerMetricSample, width int) (string, float64) 
 	for _, sample := range history {
 		level := 0
 		if maximum > 0 {
-			level = int(sample.Lag * uint64(len(levels)-1) / maximum)
+			level = int(float64(sample.Lag) / float64(maximum) * float64(len(levels)-1))
+			level = min(level, len(levels)-1)
 		}
 		trend.WriteRune(levels[level])
 	}
@@ -4627,4 +4636,12 @@ func humanBytes(value uint64) string {
 	default:
 		return fmt.Sprintf("%d B", value)
 	}
+}
+
+func nonNegativeBytes(value int64) uint64 {
+	if value <= 0 {
+		return 0
+	}
+	// #nosec G115 -- every positive int64 value is representable by uint64.
+	return uint64(value)
 }

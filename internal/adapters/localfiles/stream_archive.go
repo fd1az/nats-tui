@@ -41,6 +41,7 @@ func (osStreamArchiveFileSystem) MkdirTemp(dir, pattern string) (string, error) 
 	return os.MkdirTemp(dir, pattern)
 }
 func (osStreamArchiveFileSystem) OpenFile(name string, flag int, mode fs.FileMode) (ArchiveFile, error) {
+	// #nosec G304 -- the operator explicitly selects the backup or restore archive path.
 	return os.OpenFile(name, flag, mode)
 }
 func (osStreamArchiveFileSystem) RemoveAll(name string) error { return os.RemoveAll(name) }
@@ -144,12 +145,17 @@ func (a StreamArchive) Restore(ctx context.Context, gateway streams.SnapshotGate
 		_ = data.Close()
 		return streams.RestoreResult{}, fmt.Errorf("snapshot data is not a regular file")
 	}
+	if status.Size() < 0 {
+		_ = data.Close()
+		return streams.RestoreResult{}, fmt.Errorf("snapshot data has an invalid negative size")
+	}
 	metadata, err := a.files.OpenFile(filepath.Join(directory, streamBackupMetadata), os.O_RDONLY, 0)
 	if err != nil {
 		_ = data.Close()
 		return streams.RestoreResult{}, fmt.Errorf("open snapshot metadata: %w", err)
 	}
 	result, restoreErr := streams.NewRestoreHandler(gateway).Handle(ctx, streams.RestoreRequest{
+		// #nosec G115 -- negative file sizes are rejected above.
 		Stream: command.Stream, Data: data, Metadata: metadata, DataSize: uint64(status.Size()), ChunkSize: command.ChunkSize,
 	}, progress)
 	return result, errors.Join(restoreErr, data.Close(), metadata.Close())

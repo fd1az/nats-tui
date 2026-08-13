@@ -166,8 +166,10 @@ type FileSystem interface {
 
 type osFileSystem struct{}
 
+// #nosec G304 -- CLI users explicitly select payload and export paths.
 func (osFileSystem) ReadFile(name string) ([]byte, error) { return os.ReadFile(name) }
 func (osFileSystem) OpenFile(name string, flags int, mode os.FileMode) (io.WriteCloser, error) {
+	// #nosec G304 -- CLI users explicitly select payload and export paths.
 	return os.OpenFile(name, flags, mode)
 }
 

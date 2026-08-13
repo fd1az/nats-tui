@@ -115,6 +115,7 @@ func (m *Monitor) BackupSnapshot(ctx context.Context, request streams.BackupRequ
 		if written != len(chunk.Data) {
 			return streams.BackupResult{}, io.ErrShortWrite
 		}
+		// #nosec G115 -- written equals the non-negative length of chunk.Data after the short-write check.
 		transferred += uint64(written)
 		chunks++
 		reportStreamTransfer(progress, streams.TransferProgress{Transferred: transferred, Chunks: chunks})

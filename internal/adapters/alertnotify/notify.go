@@ -59,6 +59,7 @@ type CommandRunner interface {
 type OSCommandRunner struct{}
 
 func (OSCommandRunner) Run(ctx context.Context, program string, args []string, stdin []byte) error {
+	// #nosec G204 -- the operator explicitly configures this executable; arguments are passed without a shell.
 	command := exec.CommandContext(ctx, program, args...)
 	command.Stdin = bytes.NewReader(stdin)
 	return command.Run()

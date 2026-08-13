@@ -52,6 +52,7 @@ func (s AuthorityStore) UserSeed(_ context.Context, userID string) ([]byte, erro
 	if err != nil {
 		return nil, err
 	}
+	// #nosec G304 -- path is derived from the private authority directory and a validated account name.
 	contents, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read managed user credentials: %w", err)
@@ -72,6 +73,7 @@ func (s AuthorityStore) UserClaim(_ context.Context, userID string) (string, err
 	if err != nil {
 		return "", err
 	}
+	// #nosec G304 -- path is derived from the private authority directory and a validated user name.
 	contents, err := os.ReadFile(path)
 	if err != nil {
 		return "", fmt.Errorf("read managed user credentials: %w", err)
@@ -93,6 +95,7 @@ func (s AuthorityStore) findAccount(accountID string) (string, string, error) {
 			continue
 		}
 		path := filepath.Join(s.directory, entry.Name())
+		// #nosec G304 -- path is joined from the private authority directory and a ReadDir entry.
 		contents, err := os.ReadFile(path)
 		if err != nil {
 			return "", "", fmt.Errorf("read managed account claim: %w", err)
@@ -119,6 +122,7 @@ func (s AuthorityStore) findUser(userID string) (string, *jwt.UserClaims, error)
 			continue
 		}
 		path := filepath.Join(s.directory, entry.Name())
+		// #nosec G304 -- path is joined from the private authority directory and a ReadDir entry.
 		contents, err := os.ReadFile(path)
 		if err != nil {
 			return "", nil, fmt.Errorf("read managed user credentials: %w", err)

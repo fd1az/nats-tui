@@ -120,7 +120,7 @@ func topologyDTO(snapshot domain.Snapshot) topologyJSON {
 		result.Meta.Peers = append(result.Meta.Peers, peerJSON{Name: peer.Name, Current: peer.Current, Offline: peer.Offline, Lag: peer.Lag})
 	}
 	for _, server := range snapshot.Servers() {
-		item := serverJSON{ID: server.ID().String(), Name: server.Name(), Host: server.Host(), Cluster: server.Cluster(), Domain: server.Domain(), Version: server.Version(), Uptime: server.Uptime().String(), Tags: server.Tags(), Endpoints: server.Endpoints(), Connections: server.Connections(), Subscriptions: server.Subscriptions(), CPU: server.CPU(), Memory: uint64(server.Memory()), JetStreamMemory: server.JetStream().Memory(), JetStreamStorage: server.JetStream().Storage()}
+		item := serverJSON{ID: server.ID().String(), Name: server.Name(), Host: server.Host(), Cluster: server.Cluster(), Domain: server.Domain(), Version: server.Version(), Uptime: server.Uptime().String(), Tags: server.Tags(), Endpoints: server.Endpoints(), Connections: server.Connections(), Subscriptions: server.Subscriptions(), CPU: server.CPU(), Memory: nonNegativeCLIBytes(server.Memory()), JetStreamMemory: server.JetStream().Memory(), JetStreamStorage: server.JetStream().Storage()}
 		for _, link := range server.Links() {
 			item.Links = append(item.Links, linkJSON{Kind: string(link.Kind()), Remote: link.Remote().String(), Name: link.RemoteName(), Health: string(link.Health()), RTT: link.RTT().String(), PendingBytes: link.PendingBytes()})
 		}
@@ -177,4 +177,12 @@ func humanCLIBytes(value uint64) string {
 		return fmt.Sprintf("%d B", value)
 	}
 	return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.1f", amount), "0"), ".") + " " + units[unit]
+}
+
+func nonNegativeCLIBytes(value int64) uint64 {
+	if value <= 0 {
+		return 0
+	}
+	// #nosec G115 -- every positive int64 value is representable by uint64.
+	return uint64(value)
 }

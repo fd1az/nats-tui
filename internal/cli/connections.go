@@ -84,7 +84,7 @@ func writeConnections(output io.Writer, items []app.Connection, group app.Group)
 			if item.SlowConsumer() {
 				slow = " SLOW"
 			}
-			if _, err := fmt.Fprintf(output, "%s:%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s%s\n", item.ServerID, item.CID, valueOr(item.Name, "(unnamed)"), valueOr(item.User, "-"), item.IP, valueOr(item.Lang, "-"), item.RTT, humanCLIBytes(uint64(item.Traffic())), humanCLIBytes(uint64(item.PendingBytes)), slow); err != nil {
+			if _, err := fmt.Fprintf(output, "%s:%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s%s\n", item.ServerID, item.CID, valueOr(item.Name, "(unnamed)"), valueOr(item.User, "-"), item.IP, valueOr(item.Lang, "-"), item.RTT, humanCLIBytes(nonNegativeCLIBytes(item.Traffic())), humanCLIBytes(nonNegativeCLIBytes(item.PendingBytes)), slow); err != nil {
 				return err
 			}
 		}
